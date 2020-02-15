@@ -1,2 +1,15 @@
+dump*
+
 *.exe
-.vscode/
+*.lammpstrj
+*.png
+
+*.sln
+*.txt
+*.vcx*
+
+/x64
+/.vs
+/.vscode
+/data
+/reference
