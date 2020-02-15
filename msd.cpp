@@ -16,7 +16,6 @@ class ATOM
     double xl, xh, yl, yh, zl, zh;            // Boundary coordinates
 
     // parameters for sorting atoms
-    int i, j ,k, l;                           // Counters
     int tot_part, tot_frame, tot_type;        // # of total particles, frames, and atom types
     int istep;                                // ith step
 
@@ -139,10 +138,10 @@ int ATOM::init()
         getline(intrj,str);
         if (intrj.eof()) break;
 
-        for (j = 0; j < maxtype; j++){
+        for (int j = 0; j < maxtype; j++){
             npart[j]=0;
         }
-        for (i = 0; i < tot_part; i++){
+        for (int i = 0; i < tot_part; i++){
             intrj>>ID;
             intrj>>temptype;
             frame_data.resize(itype.size());
@@ -150,7 +149,7 @@ int ATOM::init()
 
             if (tot_frame == ti){
                 if (temptype > maxtype) {
-                    for (j = maxtype; j < temptype; j++){
+                    for (int j = maxtype; j < temptype; j++){
                         ntype.emplace_back(j+1);
                         npart.emplace_back(0);
                     }
@@ -160,17 +159,17 @@ int ATOM::init()
                 if (it != itype.end()){
                     id[distance(itype.begin(), it)].emplace_back(ID);
                     frame_data[distance(itype.begin(), it)].resize(npart[temptype-1]);
-                    for (j = 0; j < 3; j++){
+                    for (int j = 0; j < 3; j++){
                         intrj>>coord;
                         frame_data[distance(itype.begin(), it)][npart[temptype-1]-1].emplace_back(coord);
                     }
                 }
             }
             else{
-                for (j = 0; j < itype.size(); j++){
+                for (int j = 0; j < itype.size(); j++){
                     if (temptype == itype[j]) {
                         npart[temptype-1] ++;
-                        for (k = 0; k < 3; k++){
+                        for (int k = 0; k < 3; k++){
                             id_it = std::find(id[distance(itype.begin(), it)].begin(), id[distance(itype.begin(), it)].end(), ID);
                             intrj>>frame_data[distance(itype.begin(), it)][distance(id[distance(itype.begin(), it)].begin(), id_it)][k];
                         }
@@ -198,8 +197,8 @@ int ATOM::MSD_calc()
 
     // Initialization of center of mass
     xcm.resize(tf-ti);
-    for (i = 0; i < ( tf-ti ); i++){
-        for (j = 0; j < 3; j++){
+    for (int i = 0; i < ( tf-ti ); i++){
+        for (int j = 0; j < 3; j++){
             xcm[i].emplace_back(0);
         }
     }
@@ -207,17 +206,17 @@ int ATOM::MSD_calc()
     // If the drift should be cancelled
     int n;                                       // # of total used atoms
     if (subtract_com){
-        for (i = 0; i < ( tf-ti ); i++){
+        for (int i = 0; i < ( tf-ti ); i++){
             n = 0;
-            for (j = 0; j < itype.size(); j++){
-                for (k = 0; k < npart[itype[j]-1]; k++){
-                    for (l = 0; l < 3; l++){
+            for (int j = 0; j < itype.size(); j++){
+                for (int k = 0; k < npart[itype[j]-1]; k++){
+                    for (int l = 0; l < 3; l++){
                         xcm[i][l] += x[i][j][k][l];
                     }
                 }
                 n += npart[itype[j]-1];
             }
-            for (j = 0; j < 3; j++){
+            for (int j = 0; j < 3; j++){
                 xcm[i][j] *= 1/double(n);
             }
         }
@@ -230,9 +229,9 @@ int ATOM::MSD_calc()
         MSD = 0;
         for (t0 = 0; t0 <= (tf-ti-tau-1); t0+=ts){
             temp = n = 0;
-            for (i = 0; i < itype.size(); i++){
-                for (j = 0; j < npart[itype[i]-1]; j++){
-                    for (k = 0; k < 3; k++){
+            for (int i = 0; i < itype.size(); i++){
+                for (int j = 0; j < npart[itype[i]-1]; j++){
+                    for (int k = 0; k < 3; k++){
                         temp += pow( ( x[t0+tau][i][j][k]-xcm[t0+tau][k] ) - ( x[t0][i][j][k]-xcm[t0][k] ) ,2);
                     }
                 }
@@ -252,10 +251,10 @@ int ATOM::MSD_calc()
         upper_STD = lower_STD = n_upper = n_lower = 0;
         for (t0 = 0; t0 <= (tf-ti-tau-1); t0+=ts){
             temp_upper = temp_lower = 0;
-            for (i = 0; i < itype.size(); i++){
-                for (j = 0; j < npart[itype[i]-1]; j++){
+            for (int i = 0; i < itype.size(); i++){
+                for (int j = 0; j < npart[itype[i]-1]; j++){
                     SD = 0;
-                    for (k = 0; k < 3; k++){
+                    for (int k = 0; k < 3; k++){
                         SD += pow( ( x[t0+tau][i][j][k]-xcm[t0+tau][k] ) - ( x[t0][i][j][k]-xcm[t0][k] ) ,2);
                     }
                     if (SD > MSD) {
@@ -285,7 +284,7 @@ int ATOM::MSD_calc()
 
 void ATOM::skip_lines(int num_lines, std::ifstream* data)
 {
-    for (i = 0; i < num_lines; i++){
+    for (int i = 0; i < num_lines; i++){
         getline(*data,str);
     }
 }
