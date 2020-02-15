@@ -1,6 +1,5 @@
 #include "read_bin.h"
 
-
 #include <stdio.h>
 #include <string.h>
 #include "stdint.h"
@@ -153,7 +152,7 @@ void Bin::to_txt(std::string name)
             for (j = 0; j < n; ++j)  // for each line
             {
                 for (k = 0; k < size_one; ++k)  // for each data
-                    fprintf(fptxt, "%g ", buf[m++]);  // 
+                    fprintf(fptxt, "%g ", buf[m++]);  //
 
                 fprintf(fptxt, "\n");
             }
@@ -169,12 +168,3 @@ void Bin::to_txt(std::string name)
     if (buf) delete[] buf;
 }
 
-ParticleDataContainter Bin::load_chunk(std::string_view name)
-{
-    ParticleDataContainter res;
-
-
-
-
-    return res;
-}
