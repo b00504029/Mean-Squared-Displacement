@@ -32,11 +32,14 @@ class ATOM
     bool subtract_com;                        // Flag for subtracting the drift
     std::vector< std::vector< double > > xcm;   // Coordinates of the center of mass
 
-    // Parameters for MSD
+    // Parameters for MSD and the standard deviation of SD
     double dt;                                // Timestep (ps) between frames
     int ti, tf, ts;                           // Initial frame, final frame ,stride of frames
     int taui, tauf, taus, tau;                // Minimum, final, stride of, current span of frames
-    double MSD;                               // Mean-Squared Displacement
+    double MSD;                               // Mean-Square Displacement
+    double SD;                                // Square displacement
+    double upper_STD;                         // Upper STD of square displacement
+    double lower_STD;                         // Lower STD of square displacement
     int MSD_calc();
 
     // Initialization
@@ -188,7 +191,11 @@ int ATOM::MSD_calc()
 {
     ofstream outf;
     outf.open("msd.txt",ios::out);
-    outf<<"t(ps)"<<" "<<"MSD(angstroms)"<<endl;
+    outf<<"t(ps)"<<" "<<"MSD(angstrom^2)"<<endl;
+
+    ofstream outf_error;
+    outf_error.open("STD_SD.txt",ios::out);
+    outf_error<<"t(ps)"<<" "<<"STD(angstrom^2)"<<endl;
 
     // Initialization of center of mass
     xcm.resize(tf-ti);
@@ -217,10 +224,10 @@ int ATOM::MSD_calc()
         }
     }
 
-    // MSD calculation
     int t0;                                      // Referecnce frame
     double temp;                                 // Temporal average
     for (tau = taui; tau <= tauf; tau += taus){
+    	// MSD calculation
         MSD = 0;
         for (t0 = 0; t0 <= (tf-ti-tau-1); t0+=ts){
             temp = n = 0;
@@ -236,8 +243,43 @@ int ATOM::MSD_calc()
         }
         MSD *= ((1.0/((tf-ti+1-tau)/ts)/n));
         outf<<tau*dt<<" "<<MSD<<endl;
+
+        // Standard deviation calculation
+        int n_upper;                         // Counts for SD > MSD
+        int n_lower;                         // Counts for SD < MSD
+        double temp_upper;                   // Temporary value for upper standard deviation calculation
+        double temp_lower;                   // Temporary value for lower standard deviation calculation
+
+        upper_STD = lower_STD = n_upper = n_lower = 0;
+        for (t0 = 0; t0 <= (tf-ti-tau-1); t0+=ts){
+            temp_upper = temp_lower = 0;
+            for (i = 0; i < itype.size(); i++){
+                for (j = 0; j < npart[itype[i]-1]; j++){
+                    SD = 0;
+                    for (k = 0; k < 3; k++){
+                        SD += pow( ( x[t0+tau][i][j][k]-xcm[t0+tau][k] ) - ( x[t0][i][j][k]-xcm[t0][k] ) ,2);
+                    }
+                    if (SD > MSD) {
+                        temp_upper += pow( SD - MSD ,2);
+                        n_upper ++;
+                    }
+                    else {
+                        temp_lower += pow( SD - MSD ,2);
+                        n_lower ++;
+                    }
+                }
+            }
+            upper_STD += temp_upper;
+            lower_STD += temp_lower;
+        }
+        upper_STD /= n_upper;
+        upper_STD = sqrt(upper_STD);
+        lower_STD /= n_lower;
+        lower_STD = sqrt(lower_STD);
+        outf_error<<tau*dt<<" "<<upper_STD<<" "<<lower_STD<<endl;
     }
     outf.close();
+    outf_error.close();
 
     return 0;
 }
