@@ -3,9 +3,10 @@
 #include <fstream>
 #include <cmath>
 #include <cstring>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
 #include <vector>
+#include <ctime>
+#include <chrono>
 using namespace std;
 
 class ATOM
@@ -18,8 +19,9 @@ class ATOM
     int i, j ,k, l;                           // Counters
     int id;                                   // ID for all atoms read in order
     int tot_part, tot_frame, tot_type;        // # of total particles, frames, and atom types
-    int istep, itype;                         // ith step, atom type
+    int istep;                                // ith step
 
+    std::vector< int > itype;                 // Required atom types for MSD calculation
     std::vector< int > ntype;                 // # of atom types: {1,2,3,...,n}
     std::vector< int > npart;                 // # of total particles with different atom types: {125,250,....}
     std::vector< std::vector< std::vector< std::vector< double > > > > x;      // Coordinates
@@ -33,6 +35,9 @@ class ATOM
 
     // Initialization
     int init();
+
+    // Skipping frames unwanted until ti
+    void skip_lines(int ,ifstream* );
 };
 
 int main(){
@@ -44,8 +49,12 @@ int main(){
     cin>>atom.name;
 
     // Atom type
+    int a;
     cout<<"Enter the atom type: ";
-    cin>>atom.itype;
+    do {
+        cin>>a;
+        atom.itype.emplace_back(a);
+    } while (cin.get() != '\n');
 
     // Timestep in ps
     cout<<"Enter the timestep in ps: ";
@@ -59,11 +68,18 @@ int main(){
     cout<<"Enter the initial frame, final frame,and a span of frames: ";
     cin>>atom.ti>>atom.tf>>atom.ts;
 
+    // Calculate the wall-clock time
+    auto wcts = std::chrono::system_clock::now();
+
     // Initialization
     atom.init();
 
     // Mean-Squared Displacement (MSD) calculation
     atom.MSD_calc();
+
+    // End of calculation
+    std::chrono::duration< double > wctduration = (std::chrono::system_clock::now() - wcts);
+    std::cout<< "Finished in "<< wctduration.count() << " seconds [Wall Clock]" <<std::endl;
 
     return 0;
 }
@@ -77,7 +93,25 @@ int ATOM::init()
     int temptype=0, maxtype=0;
     double coord;                     // Temporal coordinates
     std::vector < std::vector < std::vector < double > > > frame_data;
-    for (tot_frame = 0; !intrj.eof() && tot_frame <= tf; tot_frame++){
+
+    // Skip the lines unwanted
+    for (tot_frame = 0; tot_frame < ti; tot_frame++){
+        if (tot_frame == 0){
+            getline(intrj,str);
+            getline(intrj,str);
+            getline(intrj,str);
+
+            intrj>>tot_part;       getline(intrj,str);
+
+            skip_lines(5+tot_part,& intrj);
+        }
+        else {
+            skip_lines(9+tot_part,& intrj);
+        }
+    }
+
+    // Read the desired lines
+    for (; !intrj.eof() && tot_frame <= tf; tot_frame++){
         getline(intrj,str);
         getline(intrj,str);
         getline(intrj,str);
@@ -98,7 +132,7 @@ int ATOM::init()
             intrj>>str;
             intrj>>temptype;
 
-            if (tot_frame == 0){
+            if (tot_frame == ti){
                 if (temptype > maxtype) {
                     for (j = maxtype; j < temptype; j++){
                         ntype.emplace_back(j+1);
@@ -115,9 +149,13 @@ int ATOM::init()
                 }
             }
             else{
-                npart[temptype-1] ++;
-                for (j = 0; j < 3; j++){
-                    intrj>>frame_data[temptype-1][npart[temptype-1]-1][j];
+                for (j = 0; j < itype.size(); j++){
+                    if (temptype == itype[j]) {
+                        npart[temptype-1] ++;
+                        for (k = 0; k < 3; k++){
+                            intrj>>frame_data[temptype-1][npart[temptype-1]-1][k];
+                        }
+                    }
                 }
             }
             getline(intrj,str);
@@ -135,23 +173,33 @@ int ATOM::MSD_calc()
     outf.open("msd.txt",ios::out);
     outf<<"t(ps)"<<" "<<"MSD(angstroms)"<<endl;
 
-    int t0;                                      // Referecnce frame
+    int t0, n=0;                                 // Referecnce frame, # of total used particles
     double temp;                                 // Temporal average
     for (tau = taui; tau <= tauf; tau += taus){
-          MSD = temp = 0;
-          for (t0 = ti; t0 <= (tf-tau-1); t0+=ts){
-                temp = 0;
-                for (j = 0; j < npart[itype-1]; j++){
-                      for (k = 0; k < 3; k++){
-                            temp += pow( x[t0+tau][itype-1][j][k] - x[t0][itype-1][j][k] ,2);
-                      }
+        MSD = 0;
+        for (t0 = 0; t0 <= (tf-ti-tau-1); t0+=ts){
+            temp = n = 0;
+            for (i = 0; i < itype.size(); i++){
+                for (j = 0; j < npart[itype[i]-1]; j++){
+                    for (k = 0; k < 3; k++){
+                        temp += pow( x[t0+tau][itype[i]-1][j][k] - x[t0][itype[i]-1][j][k] ,2);
+                    }
                 }
-                MSD += temp;
-          }
-          MSD *= ((ts/double(tf-ti+1-tau))/npart[itype-1]);
-          outf<<tau<<" "<<MSD<<endl;
+                n += npart[itype[i]-1];
+            }
+            MSD += temp;
+        }
+        MSD *= ((ts/double(tf-ti+1-tau))/n);
+        outf<<tau*dt<<" "<<MSD<<endl;
     }
     outf.close();
 
     return 0;
+}
+
+void ATOM::skip_lines(int num_lines, ifstream* data)
+{
+    for (i = 0; i < num_lines; i++){
+        getline(*data,str);
+    }
 }
