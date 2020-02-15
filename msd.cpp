@@ -8,12 +8,11 @@
 #include <algorithm>
 #include <ctime>
 #include <chrono>
-using namespace std;
 
 class ATOM
 {
     public:
-    string str, name;                         // Store the instruction, the file name
+    std::string str, name;                    // Store the instruction, the file name
     double xl, xh, yl, yh, zl, zh;            // Boundary coordinates
 
     // parameters for sorting atoms
@@ -46,7 +45,7 @@ class ATOM
     int init();
 
     // Skipping frames unwanted until ti
-    void skip_lines(int ,ifstream* );
+    void skip_lines(int, std::ifstream* );
 };
 
 int main(){
@@ -54,32 +53,32 @@ int main(){
     ATOM atom;
 
     // File name to read
-    cout<<"Enter the input file name: ";
-    cin>>atom.name;
+    std::cout<<"Enter the input file name: ";
+    std::cin>>atom.name;
 
     // Decide if the drift should be removed
-    cout<<"Enter 1/0 (Yes/No) for the drift removal: ";
-    cin>>atom.subtract_com;
+    std::cout<<"Enter 1/0 (Yes/No) for the drift removal: ";
+    std::cin>>atom.subtract_com;
 
     // Atom type
     int a;
-    cout<<"Enter the atom type: ";
+    std::cout<<"Enter the atom type: ";
     do {
-        cin>>a;
+        std::cin>>a;
         atom.itype.emplace_back(a);
-    } while (cin.get() != '\n');
+    } while (std::cin.get() != '\n');
 
     // Timestep in ps
-    cout<<"Enter the timestep in ps: ";
-    cin>>atom.dt;
+    std::cout<<"Enter the timestep in ps: ";
+    std::cin>>atom.dt;
 
     // Lag times t from taui to tauf by taus
-    cout<<"Enter the initial lag time, final lag time,and a stride of lag times: ";
-    cin>>atom.taui>>atom.tauf>>atom.taus;
+    std::cout<<"Enter the initial lag time, final lag time,and a stride of lag times: ";
+    std::cin>>atom.taui>>atom.tauf>>atom.taus;
 
     // For analysis
-    cout<<"Enter the initial frame, final frame,and a span of frames: ";
-    cin>>atom.ti>>atom.tf>>atom.ts;
+    std::cout<<"Enter the initial frame, final frame,and a span of frames: ";
+    std::cin>>atom.ti>>atom.tf>>atom.ts;
 
     // Calculate the wall-clock time
     auto wcts = std::chrono::system_clock::now();
@@ -100,8 +99,8 @@ int main(){
 int ATOM::init()
 {
     // Determine the values of tot_part, tot_frame, and tot_type
-    ifstream intrj;
-    intrj.open(name,ios::in);
+    std::ifstream intrj;
+    intrj.open(name, std::ios::in);
 
     int temptype=0, maxtype=0;
     double coord;                     // Temporal coordinates
@@ -189,13 +188,13 @@ int ATOM::init()
 
 int ATOM::MSD_calc()
 {
-    ofstream outf;
-    outf.open("msd.txt",ios::out);
-    outf<<"t(ps)"<<" "<<"MSD(angstrom^2)"<<endl;
+    std::ofstream outf;
+    outf.open("msd.txt", std::ios::out);
+    outf<<"t(ps)"<<" "<<"MSD(angstrom^2)"<<std::endl;
 
-    ofstream outf_error;
-    outf_error.open("STD_SD.txt",ios::out);
-    outf_error<<"t(ps)"<<" "<<"STD(angstrom^2)"<<endl;
+    std::ofstream outf_error;
+    outf_error.open("STD_SD.txt", std::ios::out);
+    outf_error<<"t(ps)"<<" "<<"STD(angstrom^2)"<<std::endl;
 
     // Initialization of center of mass
     xcm.resize(tf-ti);
@@ -242,7 +241,7 @@ int ATOM::MSD_calc()
             MSD += temp;
         }
         MSD *= ((1.0/((tf-ti+1-tau)/ts)/n));
-        outf<<tau*dt<<" "<<MSD<<endl;
+        outf<<tau*dt<<" "<<MSD<<std::endl;
 
         // Standard deviation calculation
         int n_upper;                         // Counts for SD > MSD
@@ -276,7 +275,7 @@ int ATOM::MSD_calc()
         upper_STD = sqrt(upper_STD);
         lower_STD /= n_lower;
         lower_STD = sqrt(lower_STD);
-        outf_error<<tau*dt<<" "<<upper_STD<<" "<<lower_STD<<endl;
+        outf_error<<tau*dt<<" "<<upper_STD<<" "<<lower_STD<<std::endl;
     }
     outf.close();
     outf_error.close();
@@ -284,7 +283,7 @@ int ATOM::MSD_calc()
     return 0;
 }
 
-void ATOM::skip_lines(int num_lines, ifstream* data)
+void ATOM::skip_lines(int num_lines, std::ifstream* data)
 {
     for (i = 0; i < num_lines; i++){
         getline(*data,str);
