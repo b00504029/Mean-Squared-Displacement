@@ -1,4 +1,4 @@
-// Read the input 3 times to construct the array
+// Read the input one time and simultaneously construct the array
 #include <iostream>
 #include <fstream>
 #include <cmath>
@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
-
 using namespace std;
 
 class ATOM
@@ -21,8 +20,8 @@ class ATOM
     int tot_part, tot_frame, tot_type;        // # of total particles, frames, and atom types
     int istep, itype;                         // ith step, atom type
 
-    std::vector< int > ipart;                 // # of particles with different atom types when counting
-    std::vector< int > npart;                 // # of total particles with different atom types
+    std::vector< int > ntype;                 // # of atom types: {1,2,3,...,n}
+    std::vector< int > npart;                 // # of total particles with different atom types: {125,250,....}
     std::vector< std::vector< std::vector< std::vector< double > > > > x;      // Coordinates
 
     // Parameters for MSD
@@ -75,8 +74,10 @@ int ATOM::init()
     ifstream intrj;
     intrj.open(name,ios::in);
 
-    int temptype=0, nexttype=0;
-    for (tot_frame = -1; !intrj.eof(); tot_frame++){
+    int temptype=0, maxtype=0;
+    double coord;                     // Temporal coordinates
+    std::vector < std::vector < std::vector < double > > > frame_data;
+    for (tot_frame = 0; !intrj.eof() && tot_frame <= tf; tot_frame++){
         getline(intrj,str);
         getline(intrj,str);
         getline(intrj,str);
@@ -88,83 +89,43 @@ int ATOM::init()
         getline(intrj,str);
         getline(intrj,str);
         getline(intrj,str);
+        if (intrj.eof()) break;
 
+        for (j = 0; j < maxtype; j++){
+            npart[j]=0;
+        }
         for (i = 0; i < tot_part; i++){
             intrj>>str;
             intrj>>temptype;
-            if (temptype > nexttype) nexttype = temptype;
-            getline(intrj,str);
-        }
-    }
-    tot_type = nexttype;
-    intrj.close();
 
-    // Cconstruct the array for the system
-    for (i = 0; i < tot_type; i++){
-        ipart.emplace_back(0);
-        npart.emplace_back(0);
-    }
-
-    intrj.open(name,ios::in);
-    getline(intrj,str);
-    getline(intrj,str);
-    getline(intrj,str);
-    getline(intrj,str);
-    getline(intrj,str);
-    getline(intrj,str);
-    getline(intrj,str);
-    getline(intrj,str);
-    getline(intrj,str);
-
-    for (i = 0; i < tot_part; i++){
-        intrj>>id;
-        intrj>>temptype;
-        npart[temptype-1] ++;
-        getline(intrj,str);
-    }
-    intrj.close();
-
-    for (i = 0; i < tot_frame; i++) {
-        std::vector< std::vector< std::vector< double > > > frame_data;
-        for (j = 0; j < tot_type ; j++) {
-            std::vector< std::vector< double > > type_data;
-            for (k = 0; k < npart[j] ; k++){
-                type_data.emplace_back(std::vector< double >{0, 0, 0});
+            if (tot_frame == 0){
+                if (temptype > maxtype) {
+                    for (j = maxtype; j < temptype; j++){
+                        ntype.emplace_back(j+1);
+                        npart.emplace_back(0);
+                    }
+                    frame_data.resize(temptype);
+                    maxtype = temptype;
+                }
+                npart[temptype-1] ++;
+                frame_data[temptype-1].resize(npart[temptype-1]);
+                for (j = 0; j < 3; j++){
+                    intrj>>coord;
+                    frame_data[temptype-1][npart[temptype-1]-1].emplace_back(coord);
+                }
             }
-            frame_data.emplace_back(type_data);
+            else{
+                npart[temptype-1] ++;
+                for (j = 0; j < 3; j++){
+                    intrj>>frame_data[temptype-1][npart[temptype-1]-1][j];
+                }
+            }
+            getline(intrj,str);
         }
         x.emplace_back(frame_data);
     }
-
-    // Read and sort coodinate for all particles
-    intrj.open(name,ios::in);
-    for (i=0 ; !intrj.eof(); i++){
-        getline(intrj,str);
-        getline(intrj,str);
-        getline(intrj,str);
-        getline(intrj,str);
-        getline(intrj,str);
-        getline(intrj,str);
-        getline(intrj,str);
-        getline(intrj,str);
-        getline(intrj,str);
-
-        if (intrj.eof()) break;
-        for (j = 0; j < tot_type; j++){
-            ipart[j]=0;
-        }
-        for (k = 0; k < tot_part; k++){
-            intrj>>id;
-            intrj>>temptype;
-            for (l = 0; l < 3; l++){
-                intrj>>x[i][temptype-1][ipart[temptype-1]][l];
-            }
-            ipart[temptype-1] ++;
-            getline(intrj,str);
-        }
-    }
+    tot_type = maxtype;
     intrj.close();
-
     return 0;
 }
 
