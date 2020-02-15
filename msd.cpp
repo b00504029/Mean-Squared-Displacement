@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cstdio>
 #include <vector>
+#include <algorithm>
 #include <ctime>
 #include <chrono>
 using namespace std;
@@ -17,14 +18,19 @@ class ATOM
 
     // parameters for sorting atoms
     int i, j ,k, l;                           // Counters
-    int id;                                   // ID for all atoms read in order
     int tot_part, tot_frame, tot_type;        // # of total particles, frames, and atom types
     int istep;                                // ith step
 
+    std::vector< std::vector < int > > id;    // ID for all atoms read in order
+    std::vector< int >::iterator id_it;       // Record the position of the ID in the id array
+    std::vector< int >::iterator it;          // Record the position of the number in an array
     std::vector< int > itype;                 // Required atom types for MSD calculation
     std::vector< int > ntype;                 // # of atom types: {1,2,3,...,n}
     std::vector< int > npart;                 // # of total particles with different atom types: {125,250,....}
-    std::vector< std::vector< std::vector< std::vector< double > > > > x;      // Coordinates
+    std::vector< std::vector< std::vector< std::vector< double > > > > x;      // Coordinates of atoms
+
+    bool subtract_com;                        // Flag for subtracting the drift
+    std::vector< std::vector< double > > xcm;   // Coordinates of the center of mass
 
     // Parameters for MSD
     double dt;                                // Timestep (ps) between frames
@@ -47,6 +53,10 @@ int main(){
     // File name to read
     cout<<"Enter the input file name: ";
     cin>>atom.name;
+
+    // Decide if the drift should be removed
+    cout<<"Enter 1/0 (Yes/No) for the drift removal: ";
+    cin>>atom.subtract_com;
 
     // Atom type
     int a;
@@ -111,6 +121,8 @@ int ATOM::init()
     }
 
     // Read the desired lines
+    int ID;
+    id.resize(itype.size());
     for (; !intrj.eof() && tot_frame <= tf; tot_frame++){
         getline(intrj,str);
         getline(intrj,str);
@@ -129,8 +141,10 @@ int ATOM::init()
             npart[j]=0;
         }
         for (i = 0; i < tot_part; i++){
-            intrj>>str;
+            intrj>>ID;
             intrj>>temptype;
+            frame_data.resize(itype.size());
+            it = std::find(itype.begin(), itype.end(), temptype);
 
             if (tot_frame == ti){
                 if (temptype > maxtype) {
@@ -138,14 +152,16 @@ int ATOM::init()
                         ntype.emplace_back(j+1);
                         npart.emplace_back(0);
                     }
-                    frame_data.resize(temptype);
                     maxtype = temptype;
                 }
                 npart[temptype-1] ++;
-                frame_data[temptype-1].resize(npart[temptype-1]);
-                for (j = 0; j < 3; j++){
-                    intrj>>coord;
-                    frame_data[temptype-1][npart[temptype-1]-1].emplace_back(coord);
+                if (it != itype.end()){
+                    id[distance(itype.begin(), it)].emplace_back(ID);
+                    frame_data[distance(itype.begin(), it)].resize(npart[temptype-1]);
+                    for (j = 0; j < 3; j++){
+                        intrj>>coord;
+                        frame_data[distance(itype.begin(), it)][npart[temptype-1]-1].emplace_back(coord);
+                    }
                 }
             }
             else{
@@ -153,7 +169,8 @@ int ATOM::init()
                     if (temptype == itype[j]) {
                         npart[temptype-1] ++;
                         for (k = 0; k < 3; k++){
-                            intrj>>frame_data[temptype-1][npart[temptype-1]-1][k];
+                            id_it = std::find(id[distance(itype.begin(), it)].begin(), id[distance(itype.begin(), it)].end(), ID);
+                            intrj>>frame_data[distance(itype.begin(), it)][distance(id[distance(itype.begin(), it)].begin(), id_it)][k];
                         }
                     }
                 }
@@ -173,7 +190,35 @@ int ATOM::MSD_calc()
     outf.open("msd.txt",ios::out);
     outf<<"t(ps)"<<" "<<"MSD(angstroms)"<<endl;
 
-    int t0, n=0;                                 // Referecnce frame, # of total used particles
+    // Initialization of center of mass
+    xcm.resize(tf-ti);
+    for (i = 0; i < ( tf-ti ); i++){
+        for (j = 0; j < 3; j++){
+            xcm[i].emplace_back(0);
+        }
+    }
+
+    // If the drift should be cancelled
+    int n;                                       // # of total used atoms
+    if (subtract_com){
+        for (i = 0; i < ( tf-ti ); i++){
+            n = 0;
+            for (j = 0; j < itype.size(); j++){
+                for (k = 0; k < npart[itype[j]-1]; k++){
+                    for (l = 0; l < 3; l++){
+                        xcm[i][l] += x[i][j][k][l];
+                    }
+                }
+                n += npart[itype[j]-1];
+            }
+            for (j = 0; j < 3; j++){
+                xcm[i][j] *= 1/double(n);
+            }
+        }
+    }
+
+    // MSD calculation
+    int t0;                                      // Referecnce frame
     double temp;                                 // Temporal average
     for (tau = taui; tau <= tauf; tau += taus){
         MSD = 0;
@@ -182,14 +227,14 @@ int ATOM::MSD_calc()
             for (i = 0; i < itype.size(); i++){
                 for (j = 0; j < npart[itype[i]-1]; j++){
                     for (k = 0; k < 3; k++){
-                        temp += pow( x[t0+tau][itype[i]-1][j][k] - x[t0][itype[i]-1][j][k] ,2);
+                        temp += pow( ( x[t0+tau][i][j][k]-xcm[t0+tau][k] ) - ( x[t0][i][j][k]-xcm[t0][k] ) ,2);
                     }
                 }
                 n += npart[itype[i]-1];
             }
             MSD += temp;
         }
-        MSD *= ((ts/double(tf-ti+1-tau))/n);
+        MSD *= ((1.0/((tf-ti+1-tau)/ts)/n));
         outf<<tau*dt<<" "<<MSD<<endl;
     }
     outf.close();
