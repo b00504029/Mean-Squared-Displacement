@@ -13,44 +13,47 @@ using namespace std;
 class ATOM
 {
     public:
-    string str, name;                         				// Store the instruction, the file name
-    double xl, xh, yl, yh, zl, zh;            				// Boundary coordinates
+    string str, name;                         					// Store the instruction, the file name
+    double xl, xh, yl, yh, zl, zh;            					// Boundary coordinates
 
     // Parameters for sorting particles
-    int i, j ,k, l;                           				// Counters
-    int tot_part, tot_frame, tot_type;        				// Total # of particles, frames, and atom types
-    int n_chain;                              				// # of total chains in one NIMs particle
-    int n_bead;                               				// # of beads per chain
-    int n_NIMs;                               				// # of NIMs in the system
+    int i, j ,k, l;                           					// Counters
+    int tot_part, tot_frame, tot_type;        					// Total # of particles, frames, and atom types
+    int n_chain;                              					// # of chains in one NIMs particle
+    int n_bead;                               					// # of beads per chain
+    int n_NIMs;                               					// # of NIMs in the system
+	int n_site;													// # of interaction sites in one NIMs particle
+	int tot_chain;												// # of all chains in the system
 	
 	// Useful vectors and variables
-	bool subtract_com;                        				// Flag for subtracting the drift
-	vector< double > mass;                    				// Masses stored in order of atom types
-    vector< vector< double > > xcm;           				// Coordinates of the center of mass: [frame][coordinate]
-	vector< vector< vector< vector< double > > > > x;      	// Coordinates of atoms: [2 frames][type][number][coordinate]
-	vector< int > itype;                      				// Required atom types for MSD calculation
-    vector< int > npart;                      				// # of total particles with different atom types required: {125,250,....}
-    vector< vector < int > > id;             				// ID for all atoms read in order
-	vector< int >::iterator it_type;       					// Record the position of the type in the itype array
-	vector< int >::iterator it_id;       					// Record the position of the ID in the id array
+	bool subtract_com;                        					// Flag for subtracting the drift
+	vector< double > mass;                    					// Masses stored in order of atom types
+    vector< vector< double > > xcm;           					// Coordinates of the center of mass: [frame][coordinate]
+	vector< vector< vector< vector< double > > > > x;      		// Coordinates of atoms: [2 frames][type][number][coordinate]
+	vector< vector< vector< double > > > xcm_chain;  			// Coordinates of C.O.M. of polymer chains: [2 frames][number][coordinate]    
+	vector< int > itype;                      					// Required atom types for MSD calculation
+    vector< int > npart;                      					// # of total particles with different atom types required: {125,250,....}
+    vector< vector < int > > id;             					// ID for all atoms read in order
+	vector< int >::iterator it_type;       						// Record the position of the type in the itype array
+	vector< int >::iterator it_id;       						// Record the position of the ID in the id array
 
     // Parameters for MSD and the standard deviation of SD
-    double dt;                                				// Timestep (ps) between frames
-    int ti, tf, ts;                           				// Initial frame, final frame ,stride of frames
-    int taui, tauf, taus, tau;                				// Minimum, final, stride of, current span of frames
-    double MSD;                               				// Mean-Square Displacement
-    double SD;                                				// Square displacement
-    double upper_STD;                         				// Upper STD of square displacement
-    double lower_STD;                         				// Lower STD of square displacement
+    double dt;                                					// Timestep (ps) between frames
+    int ti, tf, ts;                           					// Initial frame, final frame ,stride of frames
+    int taui, tauf, taus, tau;                					// Minimum, final, stride of, current span of frames
+    double MSD;                               					// Mean-Square Displacement
+    double SD;                                					// Square displacement
+    double upper_STD;                         					// Upper STD of square displacement
+    double lower_STD;                         					// Lower STD of square displacement
     int MSD_calc();
 
     // Initialization
     int init();
 
 	// Input and output
-	ifstream intrj;											// Load the trajectory
-	ofstream outf;											// Write the MSD result
-	ofstream outf_error;									// Write the standard deviation of square difference
+	ifstream intrj;												// Load the trajectory
+	ofstream outf;												// Write the MSD result
+	ofstream outf_error;										// Write the standard deviation of square difference
 
     // Skipping frames unwanted until ti
     void skip_lines(int ,ifstream* );
@@ -70,7 +73,7 @@ int main(){
 
     // Atom type
     int a;
-    cout<<"Enter the atom types used for MSD calculation: ";
+    cout<<"Enter the atom types in the chain used for MSD calculation: ";
     do {
         cin>>a;
         atom.itype.emplace_back(a);
@@ -124,14 +127,10 @@ int ATOM::init()
 	n_chain = 25;
 	n_bead = 15;
 	n_NIMs = 100;
-    tot_part = (n_bead * n_chain + 1) * n_NIMs;
-	
-	// Construct the coordinates of COM of atoms used for MSD
-    xcm.resize(2);										// 2 frames for the current frame and the next frame
-    for (i = 0; i < xcm.size(); i++)
-        for (j = 0; j < 3; j++)
-            xcm[i].emplace_back(0);
-	
+	n_site = n_chain*n_bead+1;
+	tot_chain = n_chain*n_NIMs;
+    tot_part = n_site * n_NIMs;
+
 	// Read the # of particles of all atom types	
 	intrj.open(name,ios::in);
 	
@@ -164,23 +163,40 @@ int ATOM::init()
 		}
 	}
 	
+	// Construct the coordinates of COM of atoms used for MSD
+    xcm.resize(2);										// 2 frames for the current frame and the next frame
+    for (i = 0; i < xcm.size(); i++)
+        for (j = 0; j < 3; j++)
+            xcm[i].emplace_back(0);
+	
+	// Construct the array xcm_chain
+	xcm_chain.resize(2);								// 2 frames for the current frame and the next frame
+	for (i = 0; i < xcm_chain.size(); i++){
+		xcm_chain[i].resize(tot_chain);
+        for (j = 0; j < xcm_chain[i].size(); j++)
+			for (k = 0; k < 3; k++)
+				xcm_chain[i][j].emplace_back(0);
+	}
+	
     return 0;
 }
 
 int ATOM::MSD_calc()
 {
 	// Output the MSD result
-    outf.open("msd.txt",ios::out);
+    outf.open("msd_chain.txt",ios::out);
     outf<<"t(ps)"<<" "<<"MSD(angstrom^2)"<<endl;
 
-    outf_error.open("std.txt",ios::out);
-    outf_error<<"t(ps)"<<" "<<"STD(angstrom^2)"<<endl;
+/*     outf_error.open("std_chain.txt",ios::out);
+    outf_error<<"t(ps)"<<" "<<"STD(angstrom^2)"<<endl; */
 
 	// Useful variables for MSD calculation
 	int n;												// Count the total particles used for calculation
 	int t0;                                      		// Referecnce frame
 	int temp_id;										// Temporary ID			
     int temp_type;										// Temporary atom type
+	int i_NIMs;											// i-th NIMs particle
+	int i_chain;										// i-th chain
 	long long init_pos;									// Record the position of the initial frame		
 	long long cur_pos;									// Record the position of the current frame
 	long long next_pos;									// Record the position of the next frame
@@ -217,7 +233,13 @@ int ATOM::MSD_calc()
 			for (i = 0; i < xcm.size(); i++)
 				for (j = 0; j < xcm[i].size(); j++)
 					xcm[i][j] = 0;
-				
+			
+			// Initialize the xcm_chain
+			for (i = 0; i < xcm_chain.size(); i++)
+				for (j = 0; j < xcm_chain[i].size(); j++)
+					for (k = 0; k < xcm_chain[i][j].size(); k++)
+						xcm_chain[i][j][k] = 0;
+			
 			// Read the current frame (frame index = 0)
 			tot_mass = 0;
 			for (i = 0; i < tot_part; i++){
@@ -232,6 +254,11 @@ int ATOM::MSD_calc()
 						intrj >> temp_x[j];
 						x[0][ temp_type-1 ][ distance( id[ temp_type-1 ].begin(), it_id)][j] = temp_x[j];
 						
+						// Determine the chain index
+						i_NIMs = (temp_id-1)/n_site + 1;
+						i_chain = ceil(double((temp_id-(i_NIMs-1)*n_site)-1)/n_bead)+(i_NIMs-1)*n_chain;
+						xcm_chain[0][ i_chain-1 ][j] += mass[ temp_type-1 ] * temp_x[j];
+						
 						// Calculate the C.O.M. of all atoms in the system
 						if (subtract_com) xcm[0][j] += mass[ temp_type-1 ] * temp_x[j];
 					}
@@ -240,9 +267,12 @@ int ATOM::MSD_calc()
 				getline(intrj,str);
 			}
 			
-			for (j = 0; j < 3; j++) {
+			for (i = 0; i < xcm_chain[0].size(); i++)
+				for (j = 0; j < 3; j++)
+					xcm_chain[0][i][j] /= (tot_mass/tot_chain);
+
+			for (j = 0; j < 3; j++)
 				xcm[0][j] /= tot_mass;
-			}
 			
 			// Skip the lines between two frames
 			if (tau == 0) intrj.seekg(init_pos, intrj.beg);
@@ -273,37 +303,36 @@ int ATOM::MSD_calc()
 						intrj >> temp_x[j];
 						x[1][ temp_type-1 ][ distance( id[ temp_type-1 ].begin(), it_id)][j] = temp_x[j];
 						
+						// Determine the chain index
+						i_NIMs = (temp_id-1)/n_site + 1;
+						i_chain = ceil(double((temp_id-(i_NIMs-1)*n_site)-1)/n_bead)+(i_NIMs-1)*n_chain;
+						xcm_chain[1][ i_chain-1 ][j] += mass[ temp_type-1 ] * temp_x[j];
+						
 						// Calculate the C.O.M. of all atoms in the system
 						if (subtract_com) xcm[1][j] += mass[ temp_type-1 ] * temp_x[j];
 					}
 				}
-				
 				getline(intrj,str);
 			}
 			
-			for (j = 0; j < 3; j++) {
+			for (i = 0; i < xcm_chain[1].size(); i++)
+				for (j = 0; j < 3; j++)
+					xcm_chain[1][i][j] /= (tot_mass/tot_chain);
+					
+			for (j = 0; j < 3; j++)
 				xcm[1][j] /= tot_mass;
-			}
 			
 			// MSD calculation
-			n = 0;
-			for (i = 0; i < tot_type; i++){
-				n += npart[i];
-				it_type = find(itype.begin(), itype.end(), i+1);				
-				
-				if ( it_type != itype.end() ){
-					for (j = 0; j < npart[i] ; j++){
-						for (k = 0; k < 3; k++){
-							MSD += pow( ( x[1][i][j][k]-xcm[1][k] ) - ( x[0][i][j][k]-xcm[0][k] ), 2);
-						}
-					}
+			for (i = 0; i < tot_chain; i++){
+				for (j = 0; j < 3 ; j++){
+					MSD += pow( ( xcm_chain[1][i][j]-xcm[1][j] ) - ( xcm_chain[0][i][j]-xcm[0][j] ), 2);
 				}
 			}
         }
-        MSD *= ((1.0/((tf-ti+1-tau)/ts)/n));
+        MSD *= ((1.0/((tf-ti+1-tau)/ts)/tot_chain));
         outf<<tau*dt<<" "<<MSD<<endl;
 
-        // Useful variables for STD calculation
+/*         // Useful variables for STD calculation
         int n_upper;                         			// Counts for SD > MSD
         int n_lower;                         			// Counts for SD < MSD
         double temp_upper;                   			// Temporary value for upper standard deviation calculation
@@ -328,6 +357,12 @@ int ATOM::MSD_calc()
 				for (j = 0; j < xcm[i].size(); j++)
 					xcm[i][j] = 0;
 				
+			// Initialize the xcm_chain
+			for (i = 0; i < xcm_chain.size(); i++)
+				for (j = 0; j < xcm_chain[i].size(); j++)
+					for (k = 0; k < xcm_chain[i][j].size(); k++)
+						xcm_chain[i][j][k] = 0;
+				
 			// Read the current frame (frame index = 0)
 			tot_mass = 0;
 			for (i = 0; i < tot_part; i++){
@@ -342,6 +377,11 @@ int ATOM::MSD_calc()
 						intrj >> temp_x[j];
 						x[0][ temp_type-1 ][ distance( id[ temp_type-1 ].begin(), it_id) ][j] = temp_x[j];
 						
+						// Determine the chain index
+						i_NIMs = (temp_id-1)/n_site + 1;
+						i_chain = ceil(double((temp_id-(i_NIMs-1)*n_site)-1)/n_bead)+(i_NIMs-1)*n_chain;
+						xcm_chain[0][ i_chain-1 ][j] += mass[ temp_type-1 ] * temp_x[j];
+						
 						// Calculate the C.O.M. of all atoms in the system
 						if (subtract_com) xcm[0][j] += mass[ temp_type-1 ] * temp_x[j];
 					}
@@ -350,9 +390,12 @@ int ATOM::MSD_calc()
 				getline(intrj,str);
 			}
 			
-			for (j = 0; j < 3; j++) {
+			for (i = 0; i < xcm_chain[0].size(); i++)
+				for (j = 0; j < 3; j++)
+					xcm_chain[0][i][j] /= (tot_mass/tot_chain);
+			
+			for (j = 0; j < 3; j++) 
 				xcm[0][j] /= tot_mass;
-			}
 			
 			// Skip the lines between two frames
 			if (tau == 0) intrj.seekg(init_pos, intrj.beg);
@@ -383,35 +426,39 @@ int ATOM::MSD_calc()
 						intrj >> temp_x[j];
 						x[1][ temp_type-1 ][ distance( id[ temp_type-1 ].begin(), it_id) ][j] = temp_x[j];
 						
+						// Determine the chain index
+						i_NIMs = (temp_id-1)/n_site + 1;
+						i_chain = ceil(double((temp_id-(i_NIMs-1)*n_site)-1)/n_bead)+(i_NIMs-1)*n_chain;
+						xcm_chain[1][ i_chain-1 ][j] += mass[ temp_type-1 ] * temp_x[j];
+						
 						// Calculate the C.O.M. of all atoms in the system
 						if (subtract_com) xcm[1][j] += mass[ temp_type-1 ] * temp_x[j];
 					}
 				}
-				
 				getline(intrj,str);
 			}
+			for (i = 0; i < xcm_chain[1].size(); i++)
+				for (j = 0; j < 3; j++)
+					xcm_chain[1][i][j] /= (tot_mass/tot_chain);
 			
-			for (j = 0; j < 3; j++) {
+			for (j = 0; j < 3; j++)
 				xcm[1][j] /= tot_mass;
-			}
 			
 			// Standard deviation calculation
             temp_upper = temp_lower = 0;
-            for (i = 0; i < itype.size(); i++){
-                for (j = 0; j < npart[ itype[i]-1 ]; j++){
-					SD = 0;
-					for (k = 0; k < 3; k++){
-						SD += pow( ( x[1][ itype[i]-1 ][j][k]-xcm[1][k] ) - ( x[0][ itype[i]-1 ][j][k]-xcm[0][k] ) ,2);
-					}
-					if (SD > MSD) {
-						temp_upper += pow( SD - MSD ,2);
-						n_upper ++;
-					}
-					else {
-						temp_lower += pow( SD - MSD ,2);
-						n_lower ++;
-					}
-                }
+            for (i = 0; i < tot_chain; i++){
+				SD = 0;
+				for (j = 0; j < 3; j++){
+					SD += pow( ( xcm_chain[1][i][j]-xcm[1][j] ) - ( xcm_chain[0][i][j]-xcm[0][j] ) ,2);
+				}
+				if (SD > MSD) {
+					temp_upper += pow( SD - MSD ,2);
+					n_upper ++;
+				}
+				else {
+					temp_lower += pow( SD - MSD ,2);
+					n_lower ++;
+				}
             }
             upper_STD += temp_upper;
             lower_STD += temp_lower;
@@ -420,12 +467,13 @@ int ATOM::MSD_calc()
         upper_STD = sqrt(upper_STD);
         lower_STD /= n_lower;
         lower_STD = sqrt(lower_STD);
-        outf_error<<tau*dt<<" "<<upper_STD<<" "<<lower_STD<<endl;
+        outf_error<<tau*dt<<" "<<upper_STD<<" "<<lower_STD<<endl; */
 
     }
+
 	intrj.close();
     outf.close();
-    outf_error.close();
+//    outf_error.close();
     return 0;
 }
 
