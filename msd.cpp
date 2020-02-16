@@ -11,13 +11,12 @@
 //#define OUTPUT_MSD
 
 //#include "atom.h"
-//#include "atom_refactor.h"
-#include "read_bin.h"
+#include "atom_refactor.h"
+//#include "read_bin.h"
 
 constexpr size_t N_TEST = 3;
 
-int main()
-{
+int main() {
     //for ( size_t i = 0; i < N_TEST; ++i ) {
     //    ATOM atom;
     //    double calc_time = atom.run();
@@ -30,7 +29,9 @@ int main()
     //    std::cout << "refactored: " << total_time << " [s]" << std::endl;
     //}
 
-    Bin::to_txt("data/water.bin");
+    //Bin::to_txt("data/water.bin");
+    AtomR atom_r;
+    atom_r.preread_from_bin("data/water_FRAMENUM101.bin");
 
 
     return 0;

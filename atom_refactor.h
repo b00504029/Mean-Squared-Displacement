@@ -35,16 +35,18 @@ size_t parse_frame_num(const std::string name) {
 }
 
 struct AtomR {
-    using ParticleInfo = std::unordered_map<size_t, size_t>;  // particle type (ntype) -> particle number (npart)
+    using ParticleInfo = std::unordered_map<size_t, size_t>;  // particle type (ntype) -> particle quantity (npart)
     using Particles = std::vector<double>;                    // [x0, y0, z0, x1, y1, z1, ... ]
 
     double run();
     int init();
     void preread();
+    int init_from_bin();
+    void preread_from_bin(std::string name);
     int MSD_calc();
 
     // parameters for sorting atoms
-    size_t tot_part = 0, tot_frame = 0, tot_type = 0;  // # of total particles, frames, and atom types
+    int64_t tot_part = 0, tot_frame = 0, tot_type = 0;  // # of total particles, frames, and atom types
     size_t istep = 0;                                  // ith step
 
     ParticleInfo particle_info;
@@ -62,7 +64,7 @@ struct AtomR {
 };
 
 double AtomR::run() {
-#ifdef USE_KEYBOARD_INPUT
+    #ifdef USE_KEYBOARD_INPUT
     // File name to read
     std::cout << "Enter the input file name: ";  // dump
     std::cin >> name;
@@ -86,8 +88,8 @@ double AtomR::run() {
     // For analysis
     std::cout << "Enter the initial frame, final frame,and a span of frames: ";  // 0 10 1
     std::cin >> atom.wi >> atom.wf >> atom.ws;
-#else
-#ifndef LARGE_FILE
+    #else
+    #ifndef LARGE_FILE
     name = "dump_FRAMENUM11";
     this->itype.emplace_back(1);
     this->dt = 1.0;
@@ -97,7 +99,7 @@ double AtomR::run() {
     this->wi = 0;
     this->wf = 10;
     this->ws = 1;
-#else
+    #else
     name = "NOHMs_nvt_long_FRAMENUM100001.lammpstrj";
     this->itype.emplace_back(2);
     this->dt = 1.0;
@@ -107,8 +109,8 @@ double AtomR::run() {
     this->wi = 0;
     this->wf = 90000;
     this->ws = 100;
-#endif // !LARGE_FILE
-#endif
+    #endif // !LARGE_FILE
+    #endif
 
     // Initialization
     auto init_start_time = std::chrono::system_clock::now();
@@ -136,14 +138,14 @@ int AtomR::init() {
 
     size_t curr_frame = 0;
     {   // jump to the `wi`-th frame
-        size_t num_skip_lines = wi*(9 + tot_part);
+        size_t num_skip_lines = wi * (9 + tot_part);
         skip_lines(num_skip_lines, intrj);
         curr_frame = wi;
     }
 
     {   // init `itype_to_idx`
         itype_to_idx.reserve(tot_type + 1);
-        for (size_t type_idx = 0; type_idx < itype.size(); ++type_idx){
+        for (size_t type_idx = 0; type_idx < itype.size(); ++type_idx) {
             size_t type = itype[type_idx];
             itype_to_idx[type] = type_idx;
         }
@@ -157,7 +159,7 @@ int AtomR::init() {
 
             for (auto& type : itype) {  // for particles of each type, allocate 3*num_of_particles (xyz coordinates)
                 const size_t type_idx = itype_to_idx[type];
-                const size_t num_particle_of_type = 3*particle_info[type];
+                const size_t num_particle_of_type = 3 * particle_info[type];
                 particles_vec[type_idx].resize(num_particle_of_type);
             }
         }
@@ -176,9 +178,9 @@ int AtomR::init() {
         for (size_t i = 0; i < tot_part; ++i) {
             size_t type;
             intrj >> dummy_str;  // id
-#ifdef HAS_MOL
+            #ifdef HAS_MOL
             intrj >> dummy_str;  // mol
-#endif
+            #endif
             intrj >> type;
 
             if (itype_to_idx.count(type) > 0) {
@@ -188,11 +190,11 @@ int AtomR::init() {
                 size_t write_pos_of_curr_type = write_pos[type];
                 double x, y, z;
                 intrj >> x >> y >> z;
-                coords[curr_frame][type_idx][write_pos_of_curr_type    ] = x;
+                coords[curr_frame][type_idx][write_pos_of_curr_type] = x;
                 coords[curr_frame][type_idx][write_pos_of_curr_type + 1] = y;
                 coords[curr_frame][type_idx][write_pos_of_curr_type + 2] = z;
                 write_pos[type] += 3;
-            } 
+            }
 
             std::getline(intrj, dummy_str);  // consume the rest of the line
         }
@@ -230,9 +232,9 @@ void AtomR::preread() {
         size_t type;
 
         intrj >> str;  // skip id
-#ifdef HAS_MOL
+        #ifdef HAS_MOL
         intrj >> str;  // skip mol
-#endif
+        #endif
         intrj >> type;
         ++particle_info[type];
 
@@ -242,25 +244,92 @@ void AtomR::preread() {
     tot_type = particle_info.size();
 }
 
+int AtomR::init_from_bin() {
+    return 0;
+}
+
+/**
+    preread the first frame to get the following information
+        `tot_part` done
+        `tot_frame` done
+        `tot_type`
+        `particle_info`
+ */
+void AtomR::preread_from_bin(std::string name) {
+    tot_frame = parse_frame_num(name);
+
+    std::ifstream intrj(name, std::ios::in | std::ios::binary);
+
+    int64_t timestep;
+    intrj.read(reinterpret_cast<char*>(&timestep), sizeof(int64_t));  // timestep
+
+    if (intrj.eof()) {
+        intrj.close();
+        return;
+    }
+
+    intrj.read(reinterpret_cast<char*>(&this->tot_part), sizeof(int64_t));  // natoms = 375
+
+    int triclinic;
+    intrj.read(reinterpret_cast<char*>(&triclinic), sizeof(int));  // triclinic = 0
+
+    int boundary[3][2];
+    intrj.read(reinterpret_cast<char*>(&boundary[0][0]), 6*sizeof(int));  // 6*4 = 24 bytes boundary
+
+    std::vector<double> bbx(6, 0.0);  // 6 doubles to read
+    intrj.read(reinterpret_cast<char*>(bbx.data()), 6*sizeof(double));  // xlo, xhi, ylo, yhi, zlo, zhi
+
+    if (triclinic != 0) {
+        std::vector<double> tri(3, 0.0);  // 3 doubles to read
+        intrj.read(reinterpret_cast<char*>(tri.data()), 3*sizeof(double));  // xy, xz, yz
+    }
+
+    int size_of_one_line;
+    intrj.read(reinterpret_cast<char*>(&size_of_one_line), sizeof(int));
+
+    int nchunk;
+    intrj.read(reinterpret_cast<char*>(&nchunk), sizeof(int));
+
+    std::vector<double> buf;
+    constexpr size_t type_offset = 1;  // if HAS_MOL, 2
+    for (size_t i = 0; i < nchunk; ++i) {
+        int nelems;
+        intrj.read(reinterpret_cast<char*>(&nelems), sizeof(int));
+
+        buf.resize(nelems, 0.0);
+        intrj.read(reinterpret_cast<char*>(buf.data()), nelems*sizeof(double));
+
+        for (size_t idx = 0; idx < buf.size(); idx += size_of_one_line) {
+            // assume `size_of_one_line` = 5, i.e. id, type, x, y, z
+            size_t type = static_cast<size_t>(buf[idx + type_offset]);
+            ++this->particle_info[type];
+        }
+    }
+
+    this->tot_part = this->particle_info.size();
+
+    intrj.close();
+}
+
 int AtomR::MSD_calc() {
-#ifdef OUTPUT_MSD
+    #ifdef OUTPUT_MSD
     std::ofstream outf;
-#ifndef LARGE_FILE
+    #ifndef LARGE_FILE
     outf.open("msd_refactored.txt", std::ios::out);
-#else
+    #else
     outf.open("msd_large_refactored.txt", std::ios::out);
-#endif // !LARGE_FILE
+    #endif // !LARGE_FILE
     outf << "t(ps)" << " " << "MSD(angstroms)" << std::endl;
-#endif
+    #endif
 
     size_t n = 0;  // # of total used particles
     for (size_t i = 0; i < itype.size(); ++i) {
         n += particle_info[itype[i]];
     }
 
-    auto square_error = [] ( const double a, const double b ) -> const double {
+    auto square_error = [] (const double a, const double b) -> const double {
         const double e = a - b;
-        return e*e;
+        return e * e;
     };
 
     for (tau = taui; tau <= tauf; tau += taus) {
@@ -278,20 +347,20 @@ int AtomR::MSD_calc() {
                 // transform reduce is the c++ implementation of Google MapReduce
                 // which is designed for large scale parallelization
                 const auto& vec_a = coords[t0 + tau][type_idx];
-                const auto& vec_b = coords[t0      ][type_idx];
+                const auto& vec_b = coords[t0][type_idx];
                 MSD += std::transform_reduce(vec_a.cbegin(), vec_a.cend(), vec_b.cbegin(), 0.0, std::plus<>(), square_error);
             }
         }
 
-        MSD *= ((ws/((double)wf - wi - tau))/n);
-#ifdef OUTPUT_MSD
-        outf << tau*dt << " " << MSD << std::endl;
-#endif
+        MSD *= ((ws / ((double)wf - wi - tau)) / n);
+        #ifdef OUTPUT_MSD
+        outf << tau * dt << " " << MSD << std::endl;
+        #endif
     }
 
-#ifdef OUTPUT_MSD
+    #ifdef OUTPUT_MSD
     outf.close();
-#endif
+    #endif
 
     return 0;
 }

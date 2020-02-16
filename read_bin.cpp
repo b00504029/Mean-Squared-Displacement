@@ -28,13 +28,11 @@ typedef int64_t bigint;
 #define BIGINT_FORMAT "%" PRId64
 #endif
 
-void Bin::to_txt(std::string name)
-{
+void Bin::to_txt(std::string name) {
     // open file to read
     FILE* fp;
     fopen_s(&fp, name.c_str(), "rb");
-    if (!fp)
-    {
+    if (!fp) {
         // ERROR: Could not open file
         return;
     }
@@ -58,13 +56,11 @@ void Bin::to_txt(std::string name)
     double* buf = NULL;
 
     // loop until eof
-    while (true)
-    {
+    while (true) {
         fread(&ntimestep, sizeof(bigint), 1, fp);  // 8 byte, time-step
 
         // check eof
-        if (feof(fp))
-        {
+        if (feof(fp)) {
             fclose(fp);
             fclose(fptxt);
             break;
@@ -79,8 +75,7 @@ void Bin::to_txt(std::string name)
         fread(&yhi, sizeof(double), 1, fp);
         fread(&zlo, sizeof(double), 1, fp);
         fread(&zhi, sizeof(double), 1, fp);
-        if (triclinic)
-        {
+        if (triclinic) {
             fread(&xy, sizeof(double), 1, fp);  // 8 bytes each, more detailed boundary information
             fread(&xz, sizeof(double), 1, fp);
             fread(&yz, sizeof(double), 1, fp);
@@ -96,10 +91,8 @@ void Bin::to_txt(std::string name)
         fprintf(fptxt, BIGINT_FORMAT "\n", natoms);  // Line 4
 
         m = 0;
-        for (int idim = 0; idim < 3; ++idim)
-        {
-            for (int iside = 0; iside < 2; ++iside)
-            {
+        for (int idim = 0; idim < 3; ++idim) {
+            for (int iside = 0; iside < 2; ++iside) {
                 if (boundary[idim][iside] == 0) boundstr[m++] = 'p';
                 else if (boundary[idim][iside] == 1) boundstr[m++] = 'f';
                 else if (boundary[idim][iside] == 2) boundstr[m++] = 's';
@@ -111,15 +104,12 @@ void Bin::to_txt(std::string name)
 
         // Line 5:
         //     ITEM: BOX BOUNDS pp pp pp
-        if (!triclinic)
-        {
+        if (!triclinic) {
             fprintf(fptxt, "ITEM: BOX BOUNDS %s\n", boundstr);
             fprintf(fptxt, "%g %g\n", xlo, xhi);
             fprintf(fptxt, "%g %g\n", ylo, yhi);
             fprintf(fptxt, "%g %g\n", zlo, zhi);
-        }
-        else
-        {
+        } else {
             fprintf(fptxt, "ITEM: BOX BOUNDS %s xy xz yz\n", boundstr);
             fprintf(fptxt, "%g %g %g\n", xlo, xhi, xy);
             fprintf(fptxt, "%g %g %g\n", ylo, yhi, xz);
@@ -130,13 +120,11 @@ void Bin::to_txt(std::string name)
         // start to deal with atom data
         fprintf(fptxt, "ITEM: ATOMS\n");
 
-        for (i = 0; i < nchunk; ++i)
-        {
+        for (i = 0; i < nchunk; ++i) {
             fread(&n, sizeof(int), 1, fp);  // 4 bytes, n (number of doubles in this chunk)
 
             // extend buffer to fit chunk size
-            if (n > maxbuf)
-            {
+            if (n > maxbuf) {
                 if (buf) delete[] buf;
                 buf = new double[n];  // `buf` -> double[] of size `n`
                 maxbuf = n;

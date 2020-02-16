@@ -1,8 +1,7 @@
 #pragma once
 #include <string>
 
-namespace Bin
-{
+namespace Bin {
 
 void to_txt(std::string name);
 
