@@ -2,7 +2,7 @@
 //
 
 //#define USE_KEYBOARD_INPUT
-#define LARGE_FILE  // load the 1.6GB guy
+//#define LARGE_FILE  // load the 1.6GB guy
 
 #ifdef LARGE_FILE
 #define HAS_MOL
@@ -23,15 +23,31 @@ int main() {
     //    std::cout << "original: " << calc_time << " [s]" << std::endl;
     //}
 
-    //for ( size_t i = 0; i < N_TEST; ++i ) {
-    //    AtomR atom_r;
-    //    double total_time = atom_r.run();
-    //    std::cout << "refactored: " << total_time << " [s]" << std::endl;
-    //}
+    double refactored_avg = 0.0;
+    for ( size_t i = 0; i < N_TEST; ++i ) {
+        AtomR atom_r;
+        double total_time = atom_r.run("data/water_FRAMENUM101.lammpstrj");
+        refactored_avg += total_time;
+        std::cout << "refactored: " << total_time << " [s]" << std::endl;
+    }
 
-    //Bin::to_txt("data/water.bin");
-    AtomR atom_r;
-    atom_r.preread_from_bin("data/water_FRAMENUM101.bin");
+    double bin_avg = 0.0;
+    for (size_t i = 0; i < N_TEST; ++i) {
+        AtomR atom_r;
+        double total_time = atom_r.run_bin("data/water_FRAMENUM101.bin");
+        bin_avg += total_time;
+        std::cout << "bin: " << total_time << " [s]" << std::endl;
+    }
+
+    refactored_avg /= N_TEST;
+    bin_avg /= N_TEST;
+
+    std::cout << std::endl;
+
+    std::cout << "Refactored init time avg: " << refactored_avg << " [s]" << std::endl;
+    std::cout << "Binary init time avg:     " << bin_avg << " [s]" << std::endl;
+
+    std::cout << std::endl;
 
 
     return 0;
