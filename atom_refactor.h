@@ -136,7 +136,7 @@ double AtomR::run(std::string name) {
     this->tauf = 100000;
     this->taus = 100;
     this->wi = 0;
-    this->wf = 90000;
+    this->wf = 100000;
     this->ws = 100;
     #endif // !LARGE_FILE
     #endif
@@ -273,6 +273,7 @@ void AtomR::preread(std::string name) {
 }
 
 double AtomR::run_bin(std::string name) {
+#ifndef LARGE_FILE
     this->itype.emplace_back(1);
     this->dt = 1.0;
     this->taui = 0;
@@ -281,6 +282,16 @@ double AtomR::run_bin(std::string name) {
     this->wi = 0;
     this->wf = 100;
     this->ws = 1;
+#else
+    this->itype.emplace_back(2);
+    this->dt = 1.0;
+    this->taui = 0;
+    this->tauf = 100000;
+    this->taus = 100;
+    this->wi = 0;
+    this->wf = 100000;
+    this->ws = 100;
+#endif
 
     // Initialization
     auto init_start_time = std::chrono::system_clock::now();
@@ -360,12 +371,15 @@ void AtomR::init_from_bin(std::string name) {
             int nelems;
             bin_data.read(reinterpret_cast<char*>(&nelems), sizeof(int));
 
-            int nlines = nelems / size_of_one_line;
-            size_t info_len = is_has_mol ? 3 : 2;
+            const int nlines = nelems / size_of_one_line;
+            const size_t info_len = is_has_mol ? 3 : 2;
             std::vector<double> info(info_len, 0.0);
             for (size_t k = 0; k < nlines; ++k) {
-                // assume `size_of_one_line` = 5, i.e. id, type, x, y, z
+                int nelems_unread = size_of_one_line;
+
                 bin_data.read(reinterpret_cast<char*>(info.data()), info_len * sizeof(double));
+                nelems_unread -= static_cast<int>(info_len);
+
                 size_t type = static_cast<size_t>(info[type_data_pos]);
                 if (this->itype_to_idx.count(type) > 0) {
                     // read x, y, z
@@ -377,6 +391,9 @@ void AtomR::init_from_bin(std::string name) {
                     // ignore 3 doubles
                     bin_data.ignore(3 * sizeof(double));
                 }
+                nelems_unread -= 3;
+
+                bin_data.ignore(nelems_unread * sizeof(double));
             }
         }
     }
