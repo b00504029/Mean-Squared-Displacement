@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -75,6 +77,9 @@ struct AtomR {
     void init_from_bin(std::string name);
     void preread_from_bin(std::string name);
     int MSD_calc();
+
+    // input file columns
+    std::vector<std::string> input_pattern;
 
     // parameters for sorting atoms
     int64_t tot_part = 0, tot_frame = 0, tot_type = 0;  // # of total particles, frames, and atom types
@@ -283,6 +288,7 @@ double AtomR::run_bin(std::string name) {
     this->wf = 100;
     this->ws = 1;
 #else
+    this->input_pattern = {"id", "mol", "type", "x", "y", "z", "ax", "ay", "az"};
     this->itype.emplace_back(2);
     this->dt = 1.0;
     this->taui = 0;
@@ -361,8 +367,17 @@ void AtomR::init_from_bin(std::string name) {
 
         int size_of_one_line;  // this should not change for each loop, can be optimized
         bin_data.read(reinterpret_cast<char*>(&size_of_one_line), sizeof(int));
-        const bool is_has_mol = size_of_one_line > 5;
-        const size_t type_data_pos = is_has_mol ? 2 : 1;
+
+        auto iter = std::find_if(this->input_pattern.cbegin(), this->input_pattern.cend(), [] (const std::string_view str) {
+            return str.compare("type") == 0;
+        });
+        assert(iter != this->input_pattern.cend());
+        const size_t type_offset = iter - this->input_pattern.cbegin();
+
+        const bool is_has_mol = 
+            (this->input_pattern.cend() != std::find_if(this->input_pattern.cbegin(), this->input_pattern.cend(), [] (const std::string_view str) {
+                return str.compare("mol") == 0;
+            }));
 
         int nchunk;  // this too, const for each loop
         bin_data.read(reinterpret_cast<char*>(&nchunk), sizeof(int));
@@ -380,7 +395,7 @@ void AtomR::init_from_bin(std::string name) {
                 bin_data.read(reinterpret_cast<char*>(info.data()), info_len * sizeof(double));
                 nelems_unread -= static_cast<int>(info_len);
 
-                size_t type = static_cast<size_t>(info[type_data_pos]);
+                size_t type = static_cast<size_t>(info[type_offset]);
                 if (this->itype_to_idx.count(type) > 0) {
                     // read x, y, z
                     const size_t type_idx = itype_to_idx[type];
@@ -439,12 +454,18 @@ void AtomR::preread_from_bin(std::string name) {
 
     int size_of_one_line;
     bin_data.read(reinterpret_cast<char*>(&size_of_one_line), sizeof(int));
+    assert(size_of_one_line == this->input_pattern.size());
 
     int nchunk;
     bin_data.read(reinterpret_cast<char*>(&nchunk), sizeof(int));
 
+    auto iter = std::find_if(this->input_pattern.cbegin(), this->input_pattern.cend(), [] (const std::string_view str) {
+        return str.compare("type") == 0;
+    });
+    assert(iter != this->input_pattern.cend());
+    const size_t type_offset = iter - this->input_pattern.cbegin();
+
     std::vector<double> buf;
-    const size_t type_offset = (size_of_one_line > 5) ? 2 : 1;  // if has mol
     for (size_t i = 0; i < nchunk; ++i) {
         int nelems;
         bin_data.read(reinterpret_cast<char*>(&nelems), sizeof(int));
