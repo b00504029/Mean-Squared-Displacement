@@ -10,6 +10,31 @@
 #include <unordered_map>
 #include <vector>
 
+
+/**
+    binary file layout
+
+     -------------------------------- -------------------------------- ----------------
+    |           ntimestep 8          |            natoms 8            |  triclinic 4   |
+     --------------------------------------------------------------------------------------------------
+    |                                        boundary 4 * 6                                            |
+     --------------------------------------------------------------------------------------------------
+    |                                        boundary data                                             |
+    |                                            8 * 6                                                 |
+     --------------------------------------------------------------------------------------------------
+    |                         triclinic data 8 * 3 (exist only if triclinic == 1)                      |
+     --------------------------------------------------------------------------------------------------
+    |  line size 4   |    nchunk 4    |
+     ---------------- ----------------
+
+     repeat the following block for `nchunk` times
+     ----------------
+    |     nelem 4    |
+     --------------------------------------------------------------------------------------------------
+    |                                         data 8 * nelems ...                                      |
+     --------------------------------------------------------------------------------------------------
+ */
+
 namespace {
 
 void skip_lines(size_t num_lines, std::ifstream& data) {
@@ -36,10 +61,8 @@ void skip_frame(std::istream& bin_data, size_t nframes) {
         bin_data.ignore(
             (6 * sizeof(int)) +                             // boundary
             (6 * sizeof(double)) +                          // boundary data
-            ((triclinic > 0) ? (3 * sizeof(double)) : 0));  // triclinic data (optional)
-
-
-        bin_data.ignore(sizeof(int));  // size_of_one_line;
+            ((triclinic > 0) ? (3 * sizeof(double)) : 0) +  // triclinic data (optional)
+            (sizeof(int)));                                 // line size
 
         int nchunk;
         bin_data.read(reinterpret_cast<char*>(&nchunk), sizeof(int));
@@ -57,7 +80,7 @@ void skip_frame(std::istream& bin_data, size_t nframes) {
  */
 size_t parse_frame_num(const std::string name) {
     constexpr std::string_view keyword = "FRAMENUM";
-    if (size_t pos = name.find(keyword); pos != std::string::npos) {
+    if (const size_t pos = name.find(keyword); pos != std::string::npos) {
         return std::stoull(name.c_str() + keyword.length() + pos);
     }
 
@@ -80,27 +103,27 @@ struct AtomR {
 
     // input file columns
     std::vector<std::string> input_pattern;
+    size_t type_offset = 0;
 
     // parameters for sorting atoms
     int64_t tot_part = 0, tot_frame = 0, tot_type = 0;  // # of total particles, frames, and atom types
-    size_t istep = 0;                                  // ith step
 
     ParticleInfo particle_info;
-    std::vector<size_t> itype;                         // Required atom types for MSD calculation
-    std::unordered_map<size_t, size_t> itype_to_idx;   // if `itype` = [4, 2, 8], then `itype_to_idx` = [4 -> 0], [2 -> 1], [8 -> 2]
-                                                       //     i.e. `type_idx` = itype_to_idx[type];
+    std::vector<size_t> itype;                          // Required atom types for MSD calculation
+    std::unordered_map<size_t, size_t> itype_to_idx;    // if `itype` = [4, 2, 8], then `itype_to_idx` = [4 -> 0], [2 -> 1], [8 -> 2]
+                                                        //     i.e. `type_idx` = itype_to_idx[type];
     // coords[time][type_idx]
     std::vector<std::vector<Particles>> coords;
 
     // Parameters for MSD
-    double dt = 0.0;                                   // Timestep (ps) between frames
-    size_t wi = 0, wf = 0, ws = 0;                     // Initial frame, final frame ,stride of frames
-    size_t taui = 0, tauf = 0, taus = 0, tau = 0;      // Minimum, final, stride of, current span of frames
-    double MSD = 0.0;                                  // Mean-Squared Displacement
+    double dt = 0.0;                                    // Timestep (ps) between frames
+    size_t wi = 0, wf = 0, ws = 0;                      // Initial frame, final frame ,stride of frames
+    size_t taui = 0, tauf = 0, taus = 0, tau = 0;       // Minimum, final, stride of, current span of frames
+    double MSD = 0.0;                                   // Mean-Squared Displacement
 };
 
 double AtomR::run(std::string name) {
-    #ifdef USE_KEYBOARD_INPUT
+#ifdef USE_KEYBOARD_INPUT
     // File name to read
     std::cout << "Enter the input file name: ";  // dump
     std::cin >> name;
@@ -124,8 +147,8 @@ double AtomR::run(std::string name) {
     // For analysis
     std::cout << "Enter the initial frame, final frame,and a span of frames: ";  // 0 10 1
     std::cin >> atom.wi >> atom.wf >> atom.ws;
-    #else
-    #ifndef LARGE_FILE
+#else
+#ifndef LARGE_FILE
     this->itype.emplace_back(1);
     this->dt = 1.0;
     this->taui = 0;
@@ -134,7 +157,7 @@ double AtomR::run(std::string name) {
     this->wi = 0;
     this->wf = 100;
     this->ws = 1;
-    #else
+#else
     this->itype.emplace_back(2);
     this->dt = 1.0;
     this->taui = 0;
@@ -143,8 +166,8 @@ double AtomR::run(std::string name) {
     this->wi = 0;
     this->wf = 100000;
     this->ws = 100;
-    #endif // !LARGE_FILE
-    #endif
+#endif // !LARGE_FILE
+#endif
 
     // Initialization
     auto init_start_time = std::chrono::system_clock::now();
@@ -171,61 +194,61 @@ int AtomR::init(std::string name) {
 
     size_t curr_frame = 0;
     {   // jump to the `wi`-th frame
-        size_t num_skip_lines = wi * (9 + tot_part);
+        size_t num_skip_lines = this->wi * (9 + this->tot_part);
         skip_lines(num_skip_lines, intrj);
-        curr_frame = wi;
+        curr_frame = this->wi;
     }
 
     {   // init `itype_to_idx`
-        itype_to_idx.reserve(tot_type + 1);
-        for (size_t type_idx = 0; type_idx < itype.size(); ++type_idx) {
-            size_t type = itype[type_idx];
-            itype_to_idx[type] = type_idx;
+        this->itype_to_idx.reserve(this->tot_type + 1);
+        for (size_t type_idx = 0; type_idx < this->itype.size(); ++type_idx) {
+            size_t type = this->itype[type_idx];
+            this->itype_to_idx[type] = type_idx;
         }
     }
 
-    {   // pre-allocate of `coords`
-        const size_t num_frames_to_read = wf - curr_frame + 1;
-        coords.resize(num_frames_to_read);
-        for (auto& particles_vec : coords) {
-            particles_vec.resize(itype.size());  // required types
+    {   // pre-allocate `coords`
+        const size_t num_frames_to_read = this->wf - curr_frame + 1;
+        this->coords.resize(num_frames_to_read);
+        for (auto& particles_vec : this->coords) {
+            particles_vec.resize(this->itype.size());  // required types
 
-            for (auto& type : itype) {  // for particles of each type, allocate 3*num_of_particles (xyz coordinates)
-                const size_t type_idx = itype_to_idx[type];
-                const size_t num_particle_of_type = 3 * particle_info[type];
+            for (auto& type : this->itype) {  // for particles of each type, allocate 3*num_of_particles (xyz coordinates)
+                const size_t type_idx = this->itype_to_idx[type];
+                const size_t num_particle_of_type = 3 * this->particle_info[type];
                 particles_vec[type_idx].resize(num_particle_of_type);
             }
         }
     }
 
     // read frame data
-    for (; !intrj.eof() && (curr_frame <= wf); ++curr_frame) {
+    for (; !intrj.eof() && (curr_frame <= this->wf); ++curr_frame) {
         skip_lines(9, intrj);  // first 9 lines are not needed
 
         if (intrj.eof()) break;
 
         std::unordered_map<size_t, size_t> write_pos;  // record the position of `coords` to write
-        write_pos.reserve(itype.size());
+        write_pos.reserve(this->itype.size());
 
         // read particle data
         for (int i = 0; i < this->tot_part; ++i) {
             size_t type;
             intrj >> dummy_str;  // id
-            #ifdef HAS_MOL
+#ifdef HAS_MOL
             intrj >> dummy_str;  // mol
-            #endif
+#endif
             intrj >> type;
 
-            if (itype_to_idx.count(type) > 0) {
+            if (this->itype_to_idx.count(type) > 0) {
                 // write to `coords[frame][type][x, y, z]`
-                const size_t type_idx = itype_to_idx[type];
+                const size_t type_idx = this->itype_to_idx[type];
 
                 size_t write_pos_of_curr_type = write_pos[type];
                 double x, y, z;
                 intrj >> x >> y >> z;
-                coords[curr_frame][type_idx][write_pos_of_curr_type] = x;
-                coords[curr_frame][type_idx][write_pos_of_curr_type + 1] = y;
-                coords[curr_frame][type_idx][write_pos_of_curr_type + 2] = z;
+                this->coords[curr_frame][type_idx][write_pos_of_curr_type    ] = x;
+                this->coords[curr_frame][type_idx][write_pos_of_curr_type + 1] = y;
+                this->coords[curr_frame][type_idx][write_pos_of_curr_type + 2] = z;
                 write_pos[type] += 3;
             }
 
@@ -246,7 +269,7 @@ int AtomR::init(std::string name) {
         `particle_info`
  */
 void AtomR::preread(std::string name) {
-    tot_frame = parse_frame_num(name);
+    this->tot_frame = parse_frame_num(name);
 
     std::ifstream intrj;
     intrj.open(name, std::ios::in);
@@ -255,26 +278,26 @@ void AtomR::preread(std::string name) {
     skip_lines(3, intrj);
 
     // total number of particles
-    intrj >> tot_part;
+    intrj >> this->tot_part;
     std::getline(intrj, str);
 
     skip_lines(5, intrj);
 
     // number of particles by type
-    for (int i = 0; i < tot_part; ++i) {
+    for (int i = 0; i < this->tot_part; ++i) {
         size_t type;
 
         intrj >> str;  // skip id
-        #ifdef HAS_MOL
+#ifdef HAS_MOL
         intrj >> str;  // skip mol
-        #endif
+#endif
         intrj >> type;
-        ++particle_info[type];
+        ++this->particle_info[type];
 
         std::getline(intrj, str);  // skip the rest
     }
 
-    tot_type = particle_info.size();
+    this->tot_type = this->particle_info.size();
 }
 
 double AtomR::run_bin(std::string name) {
@@ -323,36 +346,54 @@ void AtomR::init_from_bin(std::string name) {
     skip_frame(bin_data, this->wi);
     size_t curr_frame = this->wi;
 
-    // init `itype_to_idx`
-    itype_to_idx.reserve(this->tot_type + 1);
-    for (size_t type_idx = 0; type_idx < itype.size(); ++type_idx) {
-        size_t type = itype[type_idx];
-        itype_to_idx[type] = type_idx;
+    {   // init `itype_to_idx`
+        this->itype_to_idx.reserve(this->tot_type + 1);
+        size_t type_idx = 0;
+        for (auto type : this->itype) {
+            this->itype_to_idx[type] = type_idx++;
+        }
     }
     
+    {   // pre-allocate of `coords`
+        const size_t num_frames_to_read = this->wf - curr_frame + 1;
+        this->coords.resize(num_frames_to_read);
+        for (auto& particles_vec : this->coords) {
+            particles_vec.resize(this->itype.size());  // required types
 
-    // pre-allocate of `coords`
-    const size_t num_frames_to_read = this->wf - curr_frame + 1;
-    this->coords.resize(num_frames_to_read);
-    for (auto& particles_vec : this->coords) {
-        particles_vec.resize(this->itype.size());  // required types
-
-        for (auto& type : this->itype) {  // for particles of each type, allocate 3*num_of_particles (xyz coordinates)
-            const size_t type_idx = itype_to_idx[type];
-            const size_t num_particle_of_type = 3 * this->particle_info[type];
-            particles_vec[type_idx].resize(num_particle_of_type);
+            for (auto& type : this->itype) {  // for particles of each type, allocate 3*num_of_particles (xyz coordinates)
+                const size_t type_idx = this->itype_to_idx[type];
+                const size_t num_particle_of_type = 3 * this->particle_info[type];
+                particles_vec[type_idx].resize(num_particle_of_type);
+            }
         }
     }
 
+    // initialize variables used in the loops below
+    std::unordered_map<size_t, size_t> write_pos;  // record the position of `coords` to write
+    write_pos.reserve(this->itype.size());
+
+    // whether current input binary file contains 'mol' data
+    const bool is_has_mol =
+        this->input_pattern.cend() != std::find_if(this->input_pattern.cbegin(), this->input_pattern.cend(),
+                                                   [] (const std::string_view str) {
+                                                       return str.compare("mol") == 0;
+                                                   });
+    const size_t info_len = is_has_mol ? 3 : 2;  // the first `info_len` elements are not coordinate data
+    std::vector<double> info(info_len, 0.0);
+
     // read frame data
     for (; !bin_data.eof() && (curr_frame <= this->wf); ++curr_frame) {
+        write_pos.clear();
+
         bin_data.ignore(sizeof(int64_t));  // timestep
 
-        if (bin_data.eof()) return;
+        if (bin_data.eof())
+            bin_data.close();
+            return;
 
-        {   // ignores
-            bin_data.ignore(sizeof(int64_t));  // natoms
+        bin_data.ignore(sizeof(int64_t));  // natoms
 
+        {   // ignore
             int triclinic;
             bin_data.read(reinterpret_cast<char*>(&triclinic), sizeof(int));
 
@@ -362,53 +403,37 @@ void AtomR::init_from_bin(std::string name) {
                 ((triclinic > 0) ? (3 * sizeof(double)) : 0));  // triclinic data (optional)
         }
 
-        std::unordered_map<size_t, size_t> write_pos;  // record the position of `coords` to write
-        write_pos.reserve(itype.size());
-
-        int size_of_one_line;  // this should not change for each loop, can be optimized
+        int size_of_one_line;
         bin_data.read(reinterpret_cast<char*>(&size_of_one_line), sizeof(int));
 
-        auto iter = std::find_if(this->input_pattern.cbegin(), this->input_pattern.cend(), [] (const std::string_view str) {
-            return str.compare("type") == 0;
-        });
-        assert(iter != this->input_pattern.cend());
-        const size_t type_offset = iter - this->input_pattern.cbegin();
-
-        const bool is_has_mol = 
-            (this->input_pattern.cend() != std::find_if(this->input_pattern.cbegin(), this->input_pattern.cend(), [] (const std::string_view str) {
-                return str.compare("mol") == 0;
-            }));
-
-        int nchunk;  // this too, const for each loop
+        int nchunk;
         bin_data.read(reinterpret_cast<char*>(&nchunk), sizeof(int));
 
-        for (size_t i = 0; i < nchunk; ++i) {
+        for (; nchunk > 0; --nchunk) {
             int nelems;
             bin_data.read(reinterpret_cast<char*>(&nelems), sizeof(int));
 
-            const int nlines = nelems / size_of_one_line;
-            const size_t info_len = is_has_mol ? 3 : 2;
-            std::vector<double> info(info_len, 0.0);
-            for (size_t k = 0; k < nlines; ++k) {
+            int nlines = nelems / size_of_one_line;
+            for (; nlines > 0; --nlines) {
                 int nelems_unread = size_of_one_line;
 
                 bin_data.read(reinterpret_cast<char*>(info.data()), info_len * sizeof(double));
                 nelems_unread -= static_cast<int>(info_len);
 
-                size_t type = static_cast<size_t>(info[type_offset]);
-                if (this->itype_to_idx.count(type) > 0) {
-                    // read x, y, z
-                    const size_t type_idx = itype_to_idx[type];
+                size_t type = static_cast<size_t>(info[this->type_offset]);
+                if (this->itype_to_idx.count(type) > 0) {  // required atom type, read x, y, z
+                    const size_t type_idx = this->itype_to_idx[type];
                     const size_t write_pos_of_curr_type = write_pos[type];
                     bin_data.read(reinterpret_cast<char*>(&this->coords[curr_frame][type_idx][write_pos_of_curr_type]), 3 * sizeof(double));
+
                     write_pos[type] += 3;
-                } else {
-                    // ignore 3 doubles
+                } else {  // not required atom type, ignore
                     bin_data.ignore(3 * sizeof(double));
                 }
+
                 nelems_unread -= 3;
 
-                bin_data.ignore(nelems_unread * sizeof(double));
+                bin_data.ignore(nelems_unread * sizeof(double));  // ignore trailing elements
             }
         }
     }
@@ -418,55 +443,54 @@ void AtomR::init_from_bin(std::string name) {
 
 /**
     preread the first frame to get the following information
-        `tot_part` done
-        `tot_frame` done
+        `type_offset`
+        `tot_part`
+        `tot_frame`
         `tot_type`
         `particle_info`
  */
 void AtomR::preread_from_bin(std::string name) {
+    // `tot_frame`
     this->tot_frame = parse_frame_num(name);
 
     std::ifstream bin_data(name, std::ios::in | std::ios::binary);
 
-    int64_t timestep;
-    bin_data.read(reinterpret_cast<char*>(&timestep), sizeof(int64_t));  // timestep
+    bin_data.ignore(sizeof(int64_t));  // timestep
 
     if (bin_data.eof()) {
         bin_data.close();
         return;
     }
 
-    bin_data.read(reinterpret_cast<char*>(&this->tot_part), sizeof(int64_t));  // natoms = 375
+    // `tot_part`
+    bin_data.read(reinterpret_cast<char*>(&this->tot_part), sizeof(int64_t));
 
-    int triclinic;
-    bin_data.read(reinterpret_cast<char*>(&triclinic), sizeof(int));  // triclinic = 0
+    {   // ignore the middle block
+        int triclinic;
+        bin_data.read(reinterpret_cast<char*>(&triclinic), sizeof(int));
 
-    int boundary[3][2];
-    bin_data.read(reinterpret_cast<char*>(&boundary[0][0]), 6*sizeof(int));  // 6*4 = 24 bytes boundary
-
-    std::vector<double> bbx(6, 0.0);  // 6 doubles to read
-    bin_data.read(reinterpret_cast<char*>(bbx.data()), 6*sizeof(double));  // xlo, xhi, ylo, yhi, zlo, zhi
-
-    if (triclinic != 0) {
-        std::vector<double> tri(3, 0.0);  // 3 doubles to read
-        bin_data.read(reinterpret_cast<char*>(tri.data()), 3*sizeof(double));  // xy, xz, yz
+        bin_data.ignore((6 * sizeof(int)) +                            // 6 * 4 = 24 bytes boundary
+                        (6 * sizeof(double)) +                         // boundary data xlo, xhi, ylo, yhi, zlo, zhi
+                        ((triclinic != 0) ? 3 * sizeof(double) : 0));  // triclinic data xy, xz, yz
     }
 
     int size_of_one_line;
     bin_data.read(reinterpret_cast<char*>(&size_of_one_line), sizeof(int));
-    assert(size_of_one_line == this->input_pattern.size());
+    assert(size_of_one_line == this->input_pattern.size());  // make `size_of_one_line` matches the `input_pattern`
 
     int nchunk;
-    bin_data.read(reinterpret_cast<char*>(&nchunk), sizeof(int));
+    bin_data.read(reinterpret_cast<char*>(&nchunk), sizeof(int));  // nchunk
 
+    // `type_offset`
     auto iter = std::find_if(this->input_pattern.cbegin(), this->input_pattern.cend(), [] (const std::string_view str) {
         return str.compare("type") == 0;
     });
     assert(iter != this->input_pattern.cend());
-    const size_t type_offset = iter - this->input_pattern.cbegin();
+    this->type_offset = iter - this->input_pattern.cbegin();
 
+    // `particle_info`
     std::vector<double> buf;
-    for (size_t i = 0; i < nchunk; ++i) {
+    for(; nchunk > 0; --nchunk) {
         int nelems;
         bin_data.read(reinterpret_cast<char*>(&nelems), sizeof(int));
 
@@ -475,66 +499,68 @@ void AtomR::preread_from_bin(std::string name) {
 
         for (size_t idx = 0; idx < buf.size(); idx += size_of_one_line) {
             // assume `size_of_one_line` = 5, i.e. id, type, x, y, z
-            size_t type = static_cast<size_t>(buf[idx + type_offset]);
+            size_t type = static_cast<size_t>(buf[idx + this->type_offset]);
             ++this->particle_info[type];
         }
     }
 
+    // `tot_type`
     this->tot_type = this->particle_info.size();
 
     bin_data.close();
 }
 
 int AtomR::MSD_calc() {
-    #ifdef OUTPUT_MSD
+#ifdef OUTPUT_MSD
     std::ofstream outf;
-    #ifndef LARGE_FILE
+#ifndef LARGE_FILE
     outf.open("msd_refactored.txt", std::ios::out);
-    #else
+#else
     outf.open("msd_large_refactored.txt", std::ios::out);
-    #endif // !LARGE_FILE
+#endif // !LARGE_FILE
     outf << "t(ps)" << " " << "MSD(angstroms)" << std::endl;
-    #endif
+#endif
 
-    size_t n = 0;  // # of total used particles
-    for (size_t i = 0; i < itype.size(); ++i) {
-        n += particle_info[itype[i]];
-    }
+    // # of total used particles
+    const size_t N = std::accumulate(this->itype.cbegin(), this->itype.cend(), 0, [&] (size_t tmp_sum, size_t type) {
+        return tmp_sum + this->particle_info[type];
+    });
 
-    auto square_error = [] (const double a, const double b) -> const double {
+    auto square_error = [](const double a, const double b) -> const double {
         const double e = a - b;
         return e * e;
     };
 
-    for (tau = taui; tau <= tauf; tau += taus) {
-        MSD = 0;
+    constexpr double INIT_VAL = 0.0;
+    for (this->tau = this->taui; this->tau <= this->tauf; this->tau += this->taus) {
+        this->MSD = 0;
 
         //  t0 <= (wf - wi - tau - 1)   has been rearranged into   (t0 + wi + tau + 1) <= wf
         // because `t0`, `wi`, `wf`, `tau` are size_t, and the minus operation might lead to overflow (< 0)
         //
         // of course, plus operation could also overflow,
         // but that happens only when all of the numbers are huge
-        for (size_t t0 = 0; (t0 + wi + tau + 1) <= wf; t0 += ws) {  // Reference frame
-            for (size_t i = 0; i < itype.size(); ++i) {
-                const size_t type_idx = itype_to_idx[itype[i]];
+        for (size_t t0 = 0; (t0 + this->wi + this->tau + 1) <= this->wf; t0 += this->ws) {  // Reference frame
+            for (auto& type: this->itype) {
+                const size_t type_idx = this->itype_to_idx[type];
 
                 // transform reduce is the c++ implementation of Google MapReduce
                 // which is designed for large scale parallelization
-                const auto& vec_a = coords[t0 + tau][type_idx];
-                const auto& vec_b = coords[t0][type_idx];
-                MSD += std::transform_reduce(vec_a.cbegin(), vec_a.cend(), vec_b.cbegin(), 0.0, std::plus<>(), square_error);
+                const auto& vec_a = this->coords[t0 + this->tau][type_idx];
+                const auto& vec_b = this->coords[t0            ][type_idx];
+                this->MSD += std::transform_reduce(vec_a.cbegin(), vec_a.cend(), vec_b.cbegin(), INIT_VAL, std::plus<>(), square_error);
             }
         }
 
-        MSD *= ((ws / ((double)wf - wi - tau)) / n);
-        #ifdef OUTPUT_MSD
-        outf << tau * dt << " " << MSD << std::endl;
-        #endif
+        this->MSD *= ((this->ws / ((double)this->wf - this->wi - this->tau)) / N);
+#ifdef OUTPUT_MSD
+        outf << this->tau * this->dt << " " << this->MSD << std::endl;
+#endif
     }
 
-    #ifdef OUTPUT_MSD
+#ifdef OUTPUT_MSD
     outf.close();
-    #endif
+#endif
 
     return 0;
 }
