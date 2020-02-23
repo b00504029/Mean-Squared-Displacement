@@ -14,26 +14,122 @@
 /**
     binary file layout
 
-     -------------------------------- -------------------------------- ----------------
-    |           ntimestep 8          |            natoms 8            |  triclinic 4   |
-     --------------------------------------------------------------------------------------------------
-    |                                        boundary 4 * 6                                            |
-     --------------------------------------------------------------------------------------------------
-    |                                        boundary data                                             |
-    |                                            8 * 6                                                 |
-     --------------------------------------------------------------------------------------------------
-    |                         triclinic data 8 * 3 (exist only if triclinic == 1)                      |
-     --------------------------------------------------------------------------------------------------
-    |  line size 4   |    nchunk 4    |
-     ---------------- ----------------
+    1st section
+        -------------------------------- --------------------------------
+        |           ntimestep 8          |            natoms 8            |
+        -------------------------------- --------------------------------
 
-     repeat the following block for `nchunk` times
-     ----------------
-    |     nelem 4    |
-     --------------------------------------------------------------------------------------------------
-    |                                         data 8 * nelems ...                                      |
-     --------------------------------------------------------------------------------------------------
+    2nd section: triclinic and boundary
+        -----------------
+        |   triclinic 4   |
+        --------------------------------------------------------------------------------------------------
+        |                                        boundary 4 * 6                                            |
+        --------------------------------------------------------------------------------------------------
+        |                                        boundary data                                             |
+        |                                            8 * 6                                                 |
+        --------------------------------------------------------------------------------------------------
+        |                         triclinic data 8 * 3 (exist only if triclinic == 1)                      |
+        --------------------------------------------------------------------------------------------------
+
+    3rd section
+        ---------------------------------
+        |  line size 4   |    nchunk 4    |
+        ---------------- ----------------
+
+        repeat the following block for `nchunk` times
+        ----------------
+        |     nelem 4    |
+        --------------------------------------------------------------------------------------------------
+        |                                 elements = data 8 * nelems ...                                  |
+        --------------------------------------------------------------------------------------------------
  */
+namespace BinReader {
+    inline void ignore_int(std::istream& bin_data) {
+        bin_data.ignore(sizeof(int));
+    }
+
+    inline void ignore_n_int(std::istream& bin_data, size_t n) {
+        bin_data.ignore(n*sizeof(int));
+    }
+
+    inline void read_int(std::istream& bin_data, int& i) {
+        bin_data.read(reinterpret_cast<char*>(&i), sizeof(int));
+    }
+
+    inline void ignore_int64(std::istream& bin_data) {
+        bin_data.ignore(sizeof(int64_t));
+    }
+
+    inline void ignore_n_double(std::istream& bin_data, size_t n) {
+        bin_data.ignore(n * sizeof(double));
+    }
+
+    inline void read_n_double(std::istream& bin_data, size_t n, void* buf) {
+        bin_data.read(reinterpret_cast<char*>(buf), n * sizeof(double));
+    }
+
+    inline void ignore_timestep(std::istream& bin_data) {
+        BinReader::ignore_int64(bin_data);
+    }
+
+    inline void ignore_natoms(std::istream& bin_data) {
+        BinReader::ignore_int64(bin_data);
+    }
+
+    inline void read_natoms(std::istream& bin_data, int64_t& natoms) {
+        bin_data.read(reinterpret_cast<char*>(&natoms), sizeof(int64_t));
+    }
+
+    inline void ignore_triclinic_and_boundary(std::istream& bin_data) {
+        int triclinic;
+        BinReader::read_int(bin_data, triclinic);
+
+        BinReader::ignore_n_int(bin_data, 6);                                              // boundary
+        BinReader::ignore_n_double(bin_data, 6);                                           // boundary data
+        BinReader::ignore_n_double(bin_data, (triclinic > 0) ? (3 * sizeof(double)) : 0);  // triclinic data (optional)
+    }
+
+    inline void ignore_line_size(std::istream& bin_data) {
+        BinReader::ignore_int(bin_data);
+    }
+
+    inline void read_line_size(std::istream& bin_data, int& line_size) {
+        BinReader::read_int(bin_data, line_size);
+    }
+
+    inline void ignore_all_chunks(std::istream& bin_data) {
+        BinReader::ignore_line_size(bin_data);
+
+        int nchunk;
+        BinReader::read_nchunk(bin_data, nchunk);
+        for (size_t i = 0; i < nchunk; ++i) {
+            int nelem;
+            BinReader::read_nelem(bin_data, nelem);
+            BinReader::ignore_n_double(bin_data, nelem);
+        }
+    }
+
+    inline void read_nchunk(std::istream& bin_data, int& nchunk) {
+        BinReader::read_int(bin_data, nchunk);
+    }
+
+    inline void read_nelem(std::istream& bin_data, int& nelem) {
+        BinReader::read_int(bin_data, nelem);
+    }
+
+    inline void read_elements(std::istream& bin_data, int nelem, void* buf) {
+        BinReader::read_n_double(bin_data, nelem, buf);
+    }
+
+    inline void read_info(std::istream& bin_data, int ninfo, void* buf) {
+        BinReader::read_n_double(bin_data, ninfo, buf);
+    }
+
+    inline void read_xyz(std::istream& bin_data, void* buf) {
+        BinReader::read_n_double(bin_data, 3, buf);
+    }
+}
+
 
 namespace {
 
@@ -46,31 +142,17 @@ void skip_lines(size_t num_lines, std::ifstream& data) {
 
 void skip_frame(std::istream& bin_data, size_t nframes) {
     for (; nframes > 0; --nframes) {
-        bin_data.ignore(sizeof(int64_t));  // timestep
+        BinReader::ignore_timestep(bin_data);
 
         if (bin_data.eof()) {
             return;
         }
 
-        bin_data.ignore(sizeof(int64_t));  // natoms
+        BinReader::ignore_natoms(bin_data);
 
+        BinReader::ignore_triclinic_and_boundary(bin_data);
 
-        int triclinic;
-        bin_data.read(reinterpret_cast<char*>(&triclinic), sizeof(int));
-
-        bin_data.ignore(
-            (6 * sizeof(int)) +                             // boundary
-            (6 * sizeof(double)) +                          // boundary data
-            ((triclinic > 0) ? (3 * sizeof(double)) : 0) +  // triclinic data (optional)
-            (sizeof(int)));                                 // line size
-
-        int nchunk;
-        bin_data.read(reinterpret_cast<char*>(&nchunk), sizeof(int));
-        for (size_t i = 0; i < nchunk; ++i) {
-            int nelems;
-            bin_data.read(reinterpret_cast<char*>(&nelems), sizeof(int));
-            bin_data.ignore(nelems * sizeof(double));
-        }
+        BinReader::ignore_all_chunks(bin_data);
     }
 }
 
@@ -385,55 +467,47 @@ void AtomR::init_from_bin(std::string name) {
     for (; !bin_data.eof() && (curr_frame <= this->wf); ++curr_frame) {
         write_pos.clear();
 
-        bin_data.ignore(sizeof(int64_t));  // timestep
+        BinReader::ignore_timestep(bin_data);
 
         if (bin_data.eof())
             bin_data.close();
             return;
 
-        bin_data.ignore(sizeof(int64_t));  // natoms
+        BinReader::ignore_natoms(bin_data);
 
-        {   // ignore
-            int triclinic;
-            bin_data.read(reinterpret_cast<char*>(&triclinic), sizeof(int));
-
-            bin_data.ignore(
-                (6 * sizeof(int)) +                             // boundary
-                (6 * sizeof(double)) +                          // boundary data
-                ((triclinic > 0) ? (3 * sizeof(double)) : 0));  // triclinic data (optional)
-        }
+        BinReader::ignore_triclinic_and_boundary(bin_data);
 
         int size_of_one_line;
-        bin_data.read(reinterpret_cast<char*>(&size_of_one_line), sizeof(int));
+        BinReader::read_line_size(bin_data, size_of_one_line);
 
         int nchunk;
-        bin_data.read(reinterpret_cast<char*>(&nchunk), sizeof(int));
+        BinReader::read_nchunk(bin_data, nchunk);
 
         for (; nchunk > 0; --nchunk) {
             int nelems;
-            bin_data.read(reinterpret_cast<char*>(&nelems), sizeof(int));
+            BinReader::read_nelem(bin_data, nelems);
 
             int nlines = nelems / size_of_one_line;
             for (; nlines > 0; --nlines) {
                 int nelems_unread = size_of_one_line;
 
-                bin_data.read(reinterpret_cast<char*>(info.data()), info_len * sizeof(double));
+                BinReader::read_info(bin_data, info_len, info.data());
                 nelems_unread -= static_cast<int>(info_len);
 
                 size_t type = static_cast<size_t>(info[this->type_offset]);
                 if (this->itype_to_idx.count(type) > 0) {  // required atom type, read x, y, z
                     const size_t type_idx = this->itype_to_idx[type];
                     const size_t write_pos_of_curr_type = write_pos[type];
-                    bin_data.read(reinterpret_cast<char*>(&this->coords[curr_frame][type_idx][write_pos_of_curr_type]), 3 * sizeof(double));
+                    BinReader::read_xyz(bin_data, &this->coords[curr_frame][type_idx][write_pos_of_curr_type]);
 
                     write_pos[type] += 3;
                 } else {  // not required atom type, ignore
-                    bin_data.ignore(3 * sizeof(double));
+                    BinReader::ignore_n_double(bin_data, 3);
                 }
 
                 nelems_unread -= 3;
 
-                bin_data.ignore(nelems_unread * sizeof(double));  // ignore trailing elements
+                BinReader::ignore_n_double(bin_data, nelems_unread);  // ignore trailing elements
             }
         }
     }
@@ -455,7 +529,7 @@ void AtomR::preread_from_bin(std::string name) {
 
     std::ifstream bin_data(name, std::ios::in | std::ios::binary);
 
-    bin_data.ignore(sizeof(int64_t));  // timestep
+    BinReader::ignore_timestep(bin_data);
 
     if (bin_data.eof()) {
         bin_data.close();
@@ -463,23 +537,16 @@ void AtomR::preread_from_bin(std::string name) {
     }
 
     // `tot_part`
-    bin_data.read(reinterpret_cast<char*>(&this->tot_part), sizeof(int64_t));
+    BinReader::read_natoms(bin_data, this->tot_part);
 
-    {   // ignore the middle block
-        int triclinic;
-        bin_data.read(reinterpret_cast<char*>(&triclinic), sizeof(int));
-
-        bin_data.ignore((6 * sizeof(int)) +                            // 6 * 4 = 24 bytes boundary
-                        (6 * sizeof(double)) +                         // boundary data xlo, xhi, ylo, yhi, zlo, zhi
-                        ((triclinic != 0) ? 3 * sizeof(double) : 0));  // triclinic data xy, xz, yz
-    }
+    BinReader::ignore_triclinic_and_boundary(bin_data);
 
     int size_of_one_line;
-    bin_data.read(reinterpret_cast<char*>(&size_of_one_line), sizeof(int));
+    BinReader::read_line_size(bin_data, size_of_one_line);
     assert(size_of_one_line == this->input_pattern.size());  // make `size_of_one_line` matches the `input_pattern`
 
     int nchunk;
-    bin_data.read(reinterpret_cast<char*>(&nchunk), sizeof(int));  // nchunk
+    BinReader::read_nchunk(bin_data, nchunk);
 
     // `type_offset`
     auto iter = std::find_if(this->input_pattern.cbegin(), this->input_pattern.cend(), [] (const std::string_view str) {
@@ -491,11 +558,11 @@ void AtomR::preread_from_bin(std::string name) {
     // `particle_info`
     std::vector<double> buf;
     for(; nchunk > 0; --nchunk) {
-        int nelems;
-        bin_data.read(reinterpret_cast<char*>(&nelems), sizeof(int));
+        int nelem;
+        BinReader::read_nelem(bin_data, nelem);
 
-        buf.resize(nelems, 0.0);
-        bin_data.read(reinterpret_cast<char*>(buf.data()), nelems*sizeof(double));
+        buf.resize(nelem, 0.0);
+        BinReader::read_elements(bin_data, nelem, buf.data());
 
         for (size_t idx = 0; idx < buf.size(); idx += size_of_one_line) {
             // assume `size_of_one_line` = 5, i.e. id, type, x, y, z
